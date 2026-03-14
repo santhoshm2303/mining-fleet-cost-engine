@@ -168,13 +168,14 @@ const mkScenario = (name="New Scenario") => ({
     {id:uid(),name:"Base Set",fields:{oreMined:"Ore Mined",wasteMined:"Waste Mined",totalMined:"Total Mined",totalRampMined:"Total Mined",avgLoadedTravelTime:"Average loaded travel time",avgUnloadedTravelTime:"Average unloaded travel time",avgTkphDelay:"Average TKPH delay",avgNetPower:"Average Net Power"}},
   ],
   activeFleetIds: [],     // which global fleet combos are active for this scenario
+  fleetPhysicalSets: {},  // maps fleet.id -> physicalSetIdx for this scenario
   schedPeriod: "Quarterly",
   unitMul: 1,
 });
 
 // ─── FLEET COMBO (global) ──────────────────────────────────────────────
-const mkFleet = (name,truckIdx=0,diggerIdx=0,physicalSetIdx=0) => ({
-  id:uid(), name, truckIdx, diggerIdx, physicalSetIdx
+const mkFleet = (name,truckIdx=0,diggerIdx=0) => ({
+  id:uid(), name, truckIdx, diggerIdx
 });
 
 // ─── DESIGN ────────────────────────────────────────────────────────────
@@ -231,7 +232,8 @@ export default function App(){
 
   // Resolve period data for a fleet in active scenario
   const getPd=useCallback((pi,fleet)=>{
-    const mapping=scn.fieldMappings[fleet.physicalSetIdx]||scn.fieldMappings[0];
+    const psIdx=scn.fleetPhysicalSets[fleet.id]||0;
+    const mapping=scn.fieldMappings[psIdx]||scn.fieldMappings[0];
     if(!mapping)return null;
     if(scn.csvData){
       const r={period:pi+1,periodLabel:scn.csvData.gs("Period",pi)||`P${pi+1}`,days:scn.csvData.gv("Days",pi)||91};
@@ -342,7 +344,6 @@ export default function App(){
                 <div style={{fontSize:12,color:P.txM,marginBottom:8}}>
                   <div>📅 {s.csvData?`${s.csvData.np} periods from CSV`:`${s.manualData.length} manual periods`}</div>
                   <div>🔗 {s.fieldMappings.length} physical set{s.fieldMappings.length>1?"s":""}</div>
-                  <div>🏗️ {s.activeFleetIds.length===0?"All fleets active":`${s.activeFleetIds.length} fleet${s.activeFleetIds.length>1?"s":""} selected`}</div>
                   <div>⏱️ {s.schedPeriod} · {s.unitMul===1?"Tonnes":s.unitMul===1000?"kt":"Mt"}</div>
                 </div>
                 <div style={{display:"flex",gap:8,marginTop:12}}>
@@ -352,6 +353,43 @@ export default function App(){
               </div>
             ))}
           </div>
+
+          {/* Fleet Configuration for Active Scenario */}
+          <ST icon="🏗️">Fleet Configuration — {scn.name}</ST>
+          <p style={{color:P.txM,fontSize:13,marginBottom:12}}>Select which fleets are active in this scenario and assign a physical set to each fleet.</p>
+
+          <div style={{...cardS,overflowX:"auto"}}>
+            <table style={{borderCollapse:"collapse",fontFamily:ff,fontSize:12,width:"100%"}}>
+              <thead><tr style={{background:P.secBg,borderBottom:`2px solid ${P.bdS}`}}>
+                <th style={{...thS,width:50}}>Active</th>
+                <th style={{...thS,minWidth:130}}>Fleet</th>
+                <th style={{...thS,minWidth:150}}>Truck</th>
+                <th style={{...thS,minWidth:150}}>Digger</th>
+                <th style={{...thS,minWidth:180}}>Physical Set (tonnage & productivity driver)</th>
+              </tr></thead>
+              <tbody>{fleets.map((fl,fi)=>{
+                const isActive=scn.activeFleetIds.length===0||scn.activeFleetIds.includes(fl.id);
+                const psIdx=scn.fleetPhysicalSets[fl.id]||0;
+                const trk=trucks[Math.min(fl.truckIdx,trucks.length-1)];
+                const dig=diggers[Math.min(fl.diggerIdx,diggers.length-1)];
+                return(<tr key={fl.id} style={{borderBottom:`1px solid ${P.bd}`,background:isActive?"transparent":P.input+"88",opacity:isActive?1:0.5}}>
+                  <td style={{padding:"8px 12px",textAlign:"center"}}>
+                    <input type="checkbox" checked={isActive} onChange={()=>toggleFleetInScn(fl.id)} style={{width:18,height:18,cursor:"pointer"}}/>
+                  </td>
+                  <td style={{padding:"8px 12px",color:mClr[fi%mClr.length],fontWeight:700,fontSize:13}}>{fl.name}</td>
+                  <td style={{padding:"8px 12px",color:P.txM,fontSize:12}}>{trk?.truckName}</td>
+                  <td style={{padding:"8px 12px",color:P.txM,fontSize:12}}>{dig?.diggerName}</td>
+                  <td style={{padding:"6px 10px"}}>
+                    <select value={psIdx} onChange={e=>setScenarios(prev=>{const n=[...prev];const fps=Object.assign({},n[activeScnIdx].fleetPhysicalSets);fps[fl.id]=parseInt(e.target.value);n[activeScnIdx]=Object.assign({},n[activeScnIdx],{fleetPhysicalSets:fps});return n})} disabled={!isActive}
+                      style={{...selS,width:"100%",color:isActive?mClr[psIdx%mClr.length]:P.txD,fontWeight:600}}>
+                      {scn.fieldMappings.map((m,mi)=><option key={mi} value={mi}>{m.name}</option>)}
+                    </select>
+                  </td>
+                </tr>);
+              })}</tbody>
+            </table>
+          </div>
+          {scn.activeFleetIds.length===0&&<p style={{color:P.txD,fontSize:11,marginTop:6}}>All fleets active by default. Uncheck to exclude specific fleets.</p>}
         </div>)}
 
         {/* ══ SCHEDULE (for active scenario) ══ */}
@@ -415,19 +453,7 @@ export default function App(){
             <ST icon="🏗️">Fleet Combinations (Global)</ST>
             <Btn onClick={()=>setFleets(p=>[...p,mkFleet(`Fleet ${p.length+1}`)])} solid>+ Add Fleet</Btn>
           </div>
-          <p style={{color:P.txM,fontSize:13,marginBottom:8}}>Define all possible fleet combos. Then in each scenario, choose which fleets are active.</p>
-
-          {/* Active fleet selection for current scenario */}
-          <div style={{...cardS,padding:14,marginBottom:16,background:P.priBg,borderColor:`${P.pri}33`}}>
-            <div style={{fontWeight:700,color:P.pri,fontSize:13,marginBottom:8}}>Active Fleets for: {scn.name}</div>
-            <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-              {fleets.map(f=>{
-                const isActive=scn.activeFleetIds.length===0||scn.activeFleetIds.includes(f.id);
-                return(<button key={f.id} onClick={()=>toggleFleetInScn(f.id)} style={{padding:"6px 14px",borderRadius:6,border:`1.5px solid ${isActive?P.pri:P.bd}`,background:isActive?P.pri:"transparent",color:isActive?"#fff":P.txM,fontFamily:ff,fontSize:12,fontWeight:600,cursor:"pointer"}}>{f.name} {isActive?"✓":""}</button>);
-              })}
-            </div>
-            {scn.activeFleetIds.length===0&&<p style={{color:P.txD,fontSize:11,marginTop:6}}>No explicit selection — all fleets active by default. Click to select specific fleets.</p>}
-          </div>
+          <p style={{color:P.txM,fontSize:13,marginBottom:8}}>Define all possible fleet combos (Truck + Digger). Activate fleets and assign physical sets per scenario in the Scenario Manager tab.</p>
 
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill, minmax(300px, 1fr))",gap:14}}>
             {fleets.map((fl,fi)=>{
@@ -438,7 +464,7 @@ export default function App(){
                   <input type="text" value={fl.name} onChange={e=>updFleet(fi,"name",e.target.value)} style={{padding:"5px 8px",background:P.input,border:`1px solid ${P.bd}`,borderRadius:6,color:mClr[fi%mClr.length],fontFamily:ff,fontSize:14,fontWeight:700,width:160}}/>
                   {fleets.length>1&&<button onClick={()=>setFleets(p=>p.filter((_,i)=>i!==fi))} style={{background:P.rdBg,border:`1px solid ${P.rd}22`,borderRadius:5,color:P.rd,cursor:"pointer",padding:"3px 8px",fontSize:11}}>Remove</button>}
                 </div>
-                {[["Truck",fl.truckIdx,"truckIdx",trucks.map((t,i)=>({v:i,l:t.truckName}))],["Digger",fl.diggerIdx,"diggerIdx",diggers.map((d,i)=>({v:i,l:d.diggerName}))],["Physical Set",fl.physicalSetIdx,"physicalSetIdx",scn.fieldMappings.map((m,i)=>({v:i,l:m.name}))]].map(([lbl,val,key,opts])=>(
+                {[["Truck",fl.truckIdx,"truckIdx",trucks.map((t,i)=>({v:i,l:t.truckName}))],["Digger",fl.diggerIdx,"diggerIdx",diggers.map((d,i)=>({v:i,l:d.diggerName}))]].map(([lbl,val,key,opts])=>(
                   <div key={key} style={{marginBottom:8}}><label style={{display:"block",color:P.txD,fontSize:11,fontWeight:600,marginBottom:3}}>{lbl}</label>
                   <select value={val} onChange={e=>updFleet(fi,key,parseInt(e.target.value))} style={{...selS,width:"100%"}}>{opts.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}</select></div>
                 ))}
@@ -539,7 +565,8 @@ export default function App(){
               var np2=s.csvData?s.csvData.np:s.manualData.length;
               var t={mined:0,cost:0,costExc:0,trkCapex:0,digCapex:0,chgCapex:0,trucks:0,diggers:0,chargers:0};
               for(var pi=0;pi<np2;pi++){for(var fi2=0;fi2<aFl.length;fi2++){var fleet=aFl[fi2];
-                var mapping=s.fieldMappings[fleet.physicalSetIdx]||s.fieldMappings[0];
+                var psIdx2=s.fleetPhysicalSets[fleet.id]||0;
+                var mapping=s.fieldMappings[psIdx2]||s.fieldMappings[0];
                 var pd2=null;
                 if(s.csvData&&mapping){pd2={days:s.csvData.gv("Days",pi)||91};pd2.hours=s.csvData.gv("Hours",pi)||pd2.days*24;for(var pfi=0;pfi<PHYS_FIELDS.length;pfi++){var pf=PHYS_FIELDS[pfi];pd2[pf.key]=mapping.fields[pf.key]?s.csvData.gv(mapping.fields[pf.key],pi):0}}
                 else{pd2=s.manualData[pi]}
