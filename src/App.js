@@ -282,7 +282,28 @@ const addManP=()=>updScn(s=>({…s,manualData:[…s.manualData,{period:s.manualD
 const updManP=(i,k,v)=>updScn(s=>{const d=[…s.manualData];d[i]={…d[i],[k]:v};if(k===“oreMined”||k===“wasteMined”){d[i].totalMined=(d[i].oreMined||0)+(d[i].wasteMined||0);d[i].totalRampMined=d[i].totalMined}if(k===“days”)d[i].hours=v*24;return{…s,manualData:d}});
 const toggleFleetInScn=(fid)=>updScn(s=>{const ids=s.activeFleetIds.includes(fid)?s.activeFleetIds.filter(x=>x!==fid):[…s.activeFleetIds,fid];return{…s,activeFleetIds:ids}});
 
-const navs=[{id:“scenarios”,label:“Scenarios”,icon:“📋”},{id:“schedule”,label:“Schedule”,icon:“📅”},{id:“mapping”,label:“Mapping”,icon:“🔗”},{id:“fleets”,label:“Fleets”,icon:“🏗️”},{id:“results”,label:“Results”,icon:“📊”},{id:“formulas”,label:“Formulas”,icon:“🧮”},{id:“truck”,label:“Trucks”,icon:“🚛”},{id:“digger”,label:“Diggers”,icon:“⛏️”},{id:“other”,label:“Settings”,icon:“⚙️”}];
+const navGroups = [
+{ label: “Assumptions”, items: [
+{ id: “other”, label: “General”, icon: “⚙️” },
+{ id: “truck”, label: “Trucks”, icon: “🚛” },
+{ id: “digger”, label: “Diggers”, icon: “⛏️” },
+]},
+{ label: “Setup”, items: [
+{ id: “mapping”, label: “Field Mapping”, icon: “🔗” },
+{ id: “formulas”, label: “Formulas”, icon: “🧮” },
+{ id: “fleets”, label: “Fleet Combos”, icon: “🏗️” },
+]},
+{ label: “Scenario Manager”, items: [
+{ id: “scenarios”, label: “Scenarios”, icon: “📋” },
+{ id: “schedule”, label: “Schedule”, icon: “📅” },
+{ id: “results”, label: “Results”, icon: “📊” },
+]},
+{ label: “Compare”, items: [
+{ id: “comparison”, label: “Comparison”, icon: “⚖️” },
+]},
+];
+const allPageIds = navGroups.flatMap(g => g.items.map(i => i.id));
+const activeGroup = navGroups.find(g => g.items.some(i => i.id === page)) || navGroups[0];
 
 return(
 <div style={{minHeight:“100vh”,background:P.bg,color:P.tx,fontFamily:ff}}>
@@ -308,9 +329,16 @@ return(
     </div>
   </div>
 
-  {/* NAV */}
+  {/* NAV — Level 1: Groups */}
+  <div style={{display:"flex",padding:"0 32px",background:"#1f2937",overflowX:"auto"}}>
+    {navGroups.map(g=>{
+      const isActive=g===activeGroup;
+      return(<button key={g.label} onClick={()=>setPage(g.items[0].id)} style={{padding:"10px 22px",background:isActive?"rgba(255,255,255,0.08)":"transparent",border:"none",borderBottom:isActive?"2px solid #60a5fa":"2px solid transparent",color:isActive?"#f0f1f4":"#9ca3af",fontFamily:ff,fontSize:13,fontWeight:isActive?700:500,cursor:"pointer",whiteSpace:"nowrap",letterSpacing:0.2,transition:"all 0.15s"}}>{g.label}</button>);
+    })}
+  </div>
+  {/* NAV — Level 2: Pages within active group */}
   <div style={{display:"flex",padding:"0 32px",background:P.card,borderBottom:`1px solid ${P.bd}`,overflowX:"auto"}}>
-    {navs.map(n=>(<button key={n.id} onClick={()=>setPage(n.id)} style={{padding:"12px 16px",background:"transparent",border:"none",borderBottom:page===n.id?`3px solid ${P.pri}`:"3px solid transparent",color:page===n.id?P.pri:P.txD,fontFamily:ff,fontSize:12,fontWeight:page===n.id?700:500,cursor:"pointer",whiteSpace:"nowrap"}}><span style={{marginRight:5}}>{n.icon}</span>{n.label}</button>))}
+    {activeGroup.items.map(n=>(<button key={n.id} onClick={()=>setPage(n.id)} style={{padding:"11px 20px",background:"transparent",border:"none",borderBottom:page===n.id?`3px solid ${P.pri}`:"3px solid transparent",color:page===n.id?P.pri:P.txD,fontFamily:ff,fontSize:12,fontWeight:page===n.id?700:500,cursor:"pointer",whiteSpace:"nowrap",transition:"all 0.15s"}}><span style={{marginRight:6}}>{n.icon}</span>{n.label}</button>))}
   </div>
 
   <div style={{padding:"20px 32px 60px",maxWidth:1600,margin:"0 auto"}}>
@@ -519,6 +547,84 @@ return(
       {[["moistureContent","Moisture Content","%",0.001],["exchangeRate","Exchange Rate (AUD:USD)","ratio",0.01],["discountRate","Discount Rate","%",0.005],["electricityCost","Electricity Cost","$/kWh",0.001],["dieselCost","Diesel Cost","$/L",0.01],["allInFitterPerYear","All-in Fitter Rate","$/hr"],["mannedOperator","Manned Operator","$/SMU"],["calendarTime","Calendar Time","hrs/yr"],["diggerFleetRoundingThreshold","Digger Rounding","frac",0.05]].map(([k,l,u,s])=>(
         <div key={k} style={{display:"flex",alignItems:"center",gap:12,marginBottom:10}}><div style={{flex:1,color:P.txM,fontSize:14,fontWeight:500}}>{l}</div><input type="number" value={otherA[k]} onChange={e=>uO(k,parseFloat(e.target.value)||0)} step={s||0.01} style={{width:145,padding:"7px 12px",background:P.input,border:`1px solid ${P.bd}`,borderRadius:7,color:P.tx,fontFamily:mf,fontSize:14,textAlign:"right"}}/><span style={{color:P.txD,fontSize:12,fontWeight:500,minWidth:55}}>{u}</span></div>))}
     </div></div>)}
+
+    {/* ══ COMPARISON ══ */}
+    {page==="comparison"&&(<div>
+      <ST icon="⚖️">Scenario Comparison</ST>
+      <p style={{color:P.txM,fontSize:13,marginBottom:16}}>Side-by-side comparison of key metrics across all scenarios. Each column shows the grand total for that scenario.</p>
+      <div style={{...cardS,overflowX:"auto"}}>
+        <table style={{borderCollapse:"collapse",fontFamily:ff,fontSize:12,width:"100%",minWidth:500}}>
+          <thead><tr style={{background:P.secBg,borderBottom:`2px solid ${P.bdS}`}}>
+            <th style={{...thS,minWidth:250,position:"sticky",left:0,background:P.secBg,zIndex:2}}>Metric</th>
+            <th style={{...thS}}>Unit</th>
+            {scenarios.map((s,si)=>(<th key={si} style={{...thS,textAlign:"right",minWidth:140,color:si===activeScnIdx?P.pri:P.txM}}>
+              <div style={{fontWeight:700,fontSize:13}}>{s.name}</div>
+              <div style={{fontSize:10,fontWeight:400,color:P.txD}}>{s.csvData?`${s.csvData.np} periods`:`${s.manualData.length} periods`} · {s.schedPeriod}</div>
+            </th>))}
+          </tr></thead>
+          <tbody>
+            {(()=>{
+              // Compute totals for each scenario
+              const scnTotals=scenarios.map((s,si)=>{
+                const aFleets=fleets.filter(f=>s.activeFleetIds.length===0||s.activeFleetIds.includes(f.id));
+                const np=s.csvData?s.csvData.np:s.manualData.length;
+                const t={mined:0,cost:0,costExc:0,trkCapex:0,digCapex:0,chgCapex:0,trucks:0,diggers:0,chargers:0};
+                for(let pi=0;pi<np;pi++){
+                  for(const fleet of aFleets){
+                    const mapping=s.fieldMappings[fleet.physicalSetIdx]||s.fieldMappings[0];
+                    let pd=null;
+                    if(s.csvData&&mapping){pd={days:s.csvData.gv("Days",pi)||91};pd.hours=s.csvData.gv("Hours",pi)||pd.days*24;for(const pf of PHYS_FIELDS)pd[pf.key]=mapping.fields[pf.key]?s.csvData.gv(mapping.fields[pf.key],pi):0}
+                    else pd=s.manualData[pi];
+                    if(!pd)continue;
+                    const ti=Math.min(fleet.truckIdx,trucks.length-1),di=Math.min(fleet.diggerIdx,diggers.length-1);
+                    const res=calcWithFormulas({totalMined:(pd.totalMined||0)*s.unitMul,oreMined:(pd.oreMined||0)*s.unitMul,totalRampMined:(pd.totalRampMined||pd.totalMined||0)*s.unitMul,avgLoadedTravelTime:pd.avgLoadedTravelTime||0,avgUnloadedTravelTime:pd.avgUnloadedTravelTime||0,avgNetPower:pd.avgNetPower||0,avgTkphDelay:pd.avgTkphDelay||0,schedPeriod:s.schedPeriod,calendarDays:pd.days||91,calendarHours:pd.hours||2184,truck:trucks[ti],digger:diggers[di],other:otherA},formulas);
+                    if(!res)continue;
+                    t.mined+=(pd.totalMined||0)*s.unitMul;
+                    t.cost+=res.totCost||0; t.costExc+=res.totExc||0;
+                    t.trkCapex+=res.trkCapex||0; t.digCapex+=res.digCapex||0; t.chgCapex+=res.chgCapex||0;
+                    t.trucks=Math.max(t.trucks,res.trkReqR||0); t.diggers=Math.max(t.diggers,res.digFleet||0); t.chargers=Math.max(t.chargers,res.chgStaRnd||0);
+                  }
+                }
+                t.cpt=t.mined>0?t.cost/t.mined:0; t.cptExc=t.mined>0?t.costExc/t.mined:0;
+                return t;
+              });
+
+              const rows=[
+                {label:"Total Mined",key:"mined",unit:"t",fn:fmtInt},
+                {label:"Total Cost (inc Cpx)",key:"cost",unit:"AUD",fn:fmtCur,hl:1},
+                {label:"Cost per Tonne (inc Cpx)",key:"cpt",unit:"$/t",fn:fmtC2,hl:1},
+                {label:"Total Cost (exc Cpx)",key:"costExc",unit:"AUD",fn:fmtCur},
+                {label:"Cost per Tonne (exc Cpx)",key:"cptExc",unit:"$/t",fn:fmtC2},
+                {sep:true,label:"Fleet Sizing"},
+                {label:"Peak Trucks Required",key:"trucks",unit:"#",fn:fmtInt},
+                {label:"Peak Diggers Required",key:"diggers",unit:"#",fn:fmtInt},
+                {label:"Peak Charger Stations",key:"chargers",unit:"#",fn:fmtInt},
+                {sep:true,label:"Capital Expenditure"},
+                {label:"Truck Capex (total)",key:"trkCapex",unit:"AUD",fn:fmtCur},
+                {label:"Digger Capex (total)",key:"digCapex",unit:"AUD",fn:fmtCur},
+                {label:"Charger Capex (total)",key:"chgCapex",unit:"AUD",fn:fmtCur},
+              ];
+
+              return rows.map((r,ri)=>{
+                if(r.sep)return(<tr key={ri}><td colSpan={2+scenarios.length} style={{padding:"14px 10px 6px",color:P.pri,fontWeight:700,fontSize:13,borderBottom:`2px solid ${P.pri}20`,background:P.secBg}}>{r.label}</td></tr>);
+                // Find best (lowest cost, highest production) for highlighting
+                const vals=scnTotals.map(t=>t[r.key]||0);
+                const isCostMetric=r.key.includes("cost")||r.key.includes("cpt")||r.key.includes("Capex");
+                const bestVal=isCostMetric?Math.min(...vals.filter(v=>v>0)):Math.max(...vals);
+                return(<tr key={ri} style={{background:r.hl?P.hlBg:"transparent",borderBottom:`1px solid ${P.bd}`}}>
+                  <td style={{padding:"7px 14px",color:r.hl?P.hlTx:P.txM,fontSize:13,fontWeight:r.hl?600:400,position:"sticky",left:0,background:r.hl?P.hlBg:P.card,zIndex:1}}>{r.label}</td>
+                  <td style={{padding:"7px 8px",color:P.txD,fontSize:11,fontFamily:mf}}>{r.unit}</td>
+                  {scnTotals.map((t,si)=>{
+                    const v=t[r.key]||0; const isBest=v===bestVal&&v>0;
+                    return(<td key={si} style={{padding:"7px 12px",textAlign:"right",fontFamily:mf,fontSize:13,fontWeight:r.hl?700:isBest?700:400,color:isBest?P.gn:r.hl?P.hlTx:P.tx,background:isBest?P.gnBg+"66":"transparent"}}>{r.fn(v)}{isBest&&" ✓"}</td>);
+                  })}
+                </tr>);
+              });
+            })()}
+          </tbody>
+        </table>
+      </div>
+    </div>)}
   </div>
 </div>
 ```
