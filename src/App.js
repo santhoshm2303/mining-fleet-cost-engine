@@ -1,7 +1,8 @@
 import { useState, useMemo, useCallback, useRef } from "react";
 
 /* ═══════════════════════════════════════════════════════════════════════
-   MINING FLEET COST ENGINE — Multi-Period · Multi-Model · Formula Editor
+   MINING FLEET COST ENGINE v3
+   Multi-Period · Multi-Fleet · Field Mapping · Formula Editor
    ═══════════════════════════════════════════════════════════════════════ */
 
 let _id = 100;
@@ -42,126 +43,56 @@ const fmtInt = v => fmt(v, 0);
 const fmtC2 = v => { if (v === "" || v == null || isNaN(v)) return "—"; return "$" + Number(v).toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
 const fmtCur = v => { if (v === "" || v == null || isNaN(v)) return "—"; if (Math.abs(v) >= 1e6) return "$" + (v / 1e6).toFixed(2) + "M"; return "$" + Number(v).toLocaleString("en-AU", { minimumFractionDigits: 0, maximumFractionDigits: 0 }); };
 
-// ═══════════════════════════════════════════════════════════════════════
-//  FORMULA ENGINE — safe expression evaluator
-// ═══════════════════════════════════════════════════════════════════════
-// Supports: +, -, *, /, ( ), Math.ceil, Math.floor, Math.max, Math.min, Math.abs, Math.round, ternary via IF(cond,a,b)
-// Variables are looked up from a context object.
-
+// ─── EXPRESSION ENGINE ─────────────────────────────────────────────────
 function tokenize(expr) {
-  const tokens = [];
-  let i = 0;
+  const tokens = []; let i = 0;
   while (i < expr.length) {
     if (/\s/.test(expr[i])) { i++; continue; }
-    if (/[0-9.]/.test(expr[i])) {
-      let n = "";
-      while (i < expr.length && /[0-9.eE\-]/.test(expr[i])) { n += expr[i++]; }
-      tokens.push({ type: "num", val: parseFloat(n) });
-    } else if (/[a-zA-Z_]/.test(expr[i])) {
-      let id = "";
-      while (i < expr.length && /[a-zA-Z_0-9]/.test(expr[i])) { id += expr[i++]; }
-      tokens.push({ type: "id", val: id });
-    } else if ("+-*/(),<>=!&|?:".includes(expr[i])) {
-      let op = expr[i++];
-      if ((op === '<' || op === '>' || op === '=' || op === '!') && expr[i] === '=') { op += expr[i++]; }
-      if (op === '&' && expr[i] === '&') { op += expr[i++]; }
-      if (op === '|' && expr[i] === '|') { op += expr[i++]; }
-      tokens.push({ type: "op", val: op });
-    } else { i++; }
+    if (/[0-9.]/.test(expr[i])) { let n = ""; while (i < expr.length && /[0-9.eE\-]/.test(expr[i])) { n += expr[i++]; } tokens.push({ type: "num", val: parseFloat(n) }); }
+    else if (/[a-zA-Z_]/.test(expr[i])) { let id = ""; while (i < expr.length && /[a-zA-Z_0-9]/.test(expr[i])) { id += expr[i++]; } tokens.push({ type: "id", val: id }); }
+    else if ("+-*/(),<>=!&|?:".includes(expr[i])) { let op = expr[i++]; if ("<>=!".includes(op[0]) && expr[i] === '=') op += expr[i++]; if (op === '&' && expr[i] === '&') op += expr[i++]; if (op === '|' && expr[i] === '|') op += expr[i++]; tokens.push({ type: "op", val: op }); }
+    else i++;
   }
   return tokens;
 }
-
 function evalExpr(expr, ctx) {
   try {
-    const tokens = tokenize(expr);
-    let pos = 0;
+    const tokens = tokenize(expr); let pos = 0;
     const peek = () => tokens[pos] || null;
-    const eat = (v) => { const t = tokens[pos]; if (v && t?.val !== v) throw new Error(`Expected ${v}`); pos++; return t; };
-
-    function parseTernary() {
-      let r = parseOr();
-      if (peek()?.val === '?') { eat('?'); const a = parseTernary(); eat(':'); const b = parseTernary(); return r ? a : b; }
-      return r;
-    }
-    function parseOr() { let r = parseAnd(); while (peek()?.val === '||') { eat(); r = r || parseAnd(); } return r; }
-    function parseAnd() { let r = parseComp(); while (peek()?.val === '&&') { eat(); r = r && parseComp(); } return r; }
-    function parseComp() {
-      let r = parseAdd();
-      while (peek()?.val && ['<', '>', '<=', '>=', '==', '!='].includes(peek().val)) {
-        const op = eat().val;
-        const b = parseAdd();
-        if (op === '<') r = r < b; else if (op === '>') r = r > b;
-        else if (op === '<=') r = r <= b; else if (op === '>=') r = r >= b;
-        else if (op === '==') r = r == b; else if (op === '!=') r = r != b;
-      }
-      return r;
-    }
-    function parseAdd() {
-      let r = parseMul();
-      while (peek()?.val === '+' || peek()?.val === '-') { const op = eat().val; const b = parseMul(); r = op === '+' ? r + b : r - b; }
-      return r;
-    }
-    function parseMul() {
-      let r = parseUnary();
-      while (peek()?.val === '*' || peek()?.val === '/') { const op = eat().val; const b = parseUnary(); r = op === '*' ? r * b : r / b; }
-      return r;
-    }
-    function parseUnary() {
-      if (peek()?.val === '-') { eat(); return -parsePrimary(); }
-      return parsePrimary();
-    }
-    function parsePrimary() {
-      const t = peek();
-      if (!t) throw new Error("Unexpected end");
+    const eat = (v) => { const t = tokens[pos]; if (v && t?.val !== v) throw 0; pos++; return t; };
+    function pTern() { let r = pOr(); if (peek()?.val === '?') { eat('?'); const a = pTern(); eat(':'); const b = pTern(); return r ? a : b; } return r; }
+    function pOr() { let r = pAnd(); while (peek()?.val === '||') { eat(); r = r || pAnd(); } return r; }
+    function pAnd() { let r = pCmp(); while (peek()?.val === '&&') { eat(); r = r && pCmp(); } return r; }
+    function pCmp() { let r = pAdd(); while (peek()?.val && ['<','>','<=','>=','==','!='].includes(peek().val)) { const o = eat().val, b = pAdd(); r = o==='<'?r<b:o==='>'?r>b:o==='<='?r<=b:o==='>='?r>=b:o==='=='?r==b:r!=b; } return r; }
+    function pAdd() { let r = pMul(); while (peek()?.val === '+' || peek()?.val === '-') { const o = eat().val, b = pMul(); r = o === '+' ? r + b : r - b; } return r; }
+    function pMul() { let r = pUn(); while (peek()?.val === '*' || peek()?.val === '/') { const o = eat().val, b = pUn(); r = o === '*' ? r * b : r / b; } return r; }
+    function pUn() { if (peek()?.val === '-') { eat(); return -pPri(); } return pPri(); }
+    function pPri() {
+      const t = peek(); if (!t) throw 0;
       if (t.type === "num") { eat(); return t.val; }
-      if (t.val === '(') { eat('('); const r = parseTernary(); eat(')'); return r; }
+      if (t.val === '(') { eat('('); const r = pTern(); eat(')'); return r; }
       if (t.type === "id") {
-        const name = eat().val;
-        // Built-in functions
+        const nm = eat().val;
         const fns = { ceil: Math.ceil, floor: Math.floor, max: Math.max, min: Math.min, abs: Math.abs, round: Math.round, CEIL: Math.ceil, FLOOR: Math.floor, MAX: Math.max, MIN: Math.min, ABS: Math.abs, ROUND: Math.round, ROUNDUP: Math.ceil, ROUNDDOWN: Math.floor };
-        if (name === "IF" || name === "if") {
-          eat('('); const cond = parseTernary(); eat(','); const a = parseTernary(); eat(','); const b = parseTernary(); eat(')');
-          return cond ? a : b;
-        }
-        if (fns[name] && peek()?.val === '(') {
-          eat('(');
-          const args = [parseTernary()];
-          while (peek()?.val === ',') { eat(','); args.push(parseTernary()); }
-          eat(')');
-          return fns[name](...args);
-        }
-        // Variable lookup
-        if (ctx.hasOwnProperty(name)) {
-          const v = ctx[name];
-          return typeof v === "number" ? v : (parseFloat(v) || 0);
-        }
-        return 0; // unknown var = 0
+        if ((nm === "IF" || nm === "if") && peek()?.val === '(') { eat('('); const c = pTern(); eat(','); const a = pTern(); eat(','); const b = pTern(); eat(')'); return c ? a : b; }
+        if (fns[nm] && peek()?.val === '(') { eat('('); const args = [pTern()]; while (peek()?.val === ',') { eat(','); args.push(pTern()); } eat(')'); return fns[nm](...args); }
+        if (ctx.hasOwnProperty(nm)) { const v = ctx[nm]; return typeof v === "number" ? v : (parseFloat(v) || 0); }
+        return 0;
       }
-      throw new Error("Unexpected token: " + JSON.stringify(t));
+      throw 0;
     }
-
-    const result = parseTernary();
-    if (!isFinite(result)) return "";
-    return result;
-  } catch (e) {
-    return ""; // formula error = blank
-  }
+    const result = pTern(); return isFinite(result) ? result : "";
+  } catch { return ""; }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-//  DEFAULT FORMULAS — each is { key, label, unit, section, formula, dec, hl, cur }
-// ═══════════════════════════════════════════════════════════════════════
+// ─── DEFAULT FORMULAS ──────────────────────────────────────────────────
 const defaultFormulas = () => [
-  // ═══ 1. DIGGER HOURS & FLEET ═══
   { key: "digOE", label: "Digger Overall Efficiency", unit: "ratio", section: "⛏️ DIGGER — Hours & Fleet Sizing", group: "Digger TUM", formula: "D_availability * D_useOfAvailability * D_operatingEfficiency", dec: 4 },
   { key: "digHrsReq", label: "Digger Hours Required", unit: "hrs", group: "Digger TUM", formula: "totalMined / D_effectiveDigRate" },
   { key: "smuHrs", label: "Digger SMU Hours", unit: "hrs", group: "Digger TUM", formula: "(digHrsReq / digOE) * D_utToSmuConversion" },
   { key: "digQty", label: "Digger Quantity per Period", unit: "#", group: "Fleet Sizing", formula: "digHrsReq / (D_effectiveTime * periodMultiplier)", dec: 3 },
   { key: "digFleet", label: "Digger Fleet Required", unit: "#", group: "Fleet Sizing", formula: "IF(digQty <= 0, 0, IF((digQty - floor(digQty)) > O_diggerFleetRoundingThreshold, CEIL(digQty), MAX(1, floor(digQty))))", hl: 1 },
   { key: "digCapex", label: "Digger Capex", unit: "AUD", group: "Fleet Sizing", formula: "digFleet * D_totalCapex", cur: 1 },
-
-  // ═══ 2. DIGGER OPEX ═══
   { key: "digOpxDiesel", label: "Diesel/Electricity Cost", unit: "AUD", section: "⛏️ DIGGER — Operating Costs", group: "Opex Line Items", formula: "smuHrs * D_dieselElectricityCost", cur: 1 },
   { key: "digOpxMaint", label: "Maintenance Labour", unit: "AUD", group: "Opex Line Items", formula: "smuHrs * D_maintenanceLabour", cur: 1 },
   { key: "digOpxOil", label: "Oil and Coolant", unit: "AUD", group: "Opex Line Items", formula: "smuHrs * D_oilAndCoolant", cur: 1 },
@@ -179,12 +110,8 @@ const defaultFormulas = () => [
   { key: "digOpxIncCpx", label: "Opex inc Capex per Tonne", unit: "$/t", group: "Digger Totals", formula: "(digOpxTotal + smuHrs * D_capexPerSmuHour) / totalMined", cur: 1 },
   { key: "digCostActivity", label: "Total Digger Cost (inc Cpx)", unit: "AUD", group: "Digger Totals", formula: "digOpxIncCpx * totalMined", hl: 1, cur: 1 },
   { key: "digRehandle", label: "Digger Rehandle Opex", unit: "AUD", group: "Digger Totals", formula: "D_rehandleCostPerTonne * oreMined", cur: 1 },
-
-  // ═══ 3. TRUCK CYCLE TIME ═══
   { key: "cycleTime", label: "Total Cycle Time", unit: "min", section: "🚛 TRUCK — Cycle Time", group: "Cycle Time", formula: "T_spotLoadQueueDump + avgLoadedTravelTime + avgUnloadedTravelTime + avgTkphDelay" },
   { key: "energyBurn", label: "Energy Burn Rate", unit: "kWh/hr", group: "Cycle Time", formula: "avgNetPower / (cycleTime / 60)" },
-
-  // ═══ 4. CHARGING CALCS ═══
   { key: "cycPerChg", label: "Cycles per Charge", unit: "#", section: "🔌 TRUCK — Charging", group: "Charge Cycles", formula: "T_averageBatteryUsableCapacity / avgNetPower", dec: 3 },
   { key: "cycPerChgRD", label: "Cycles per Charge (Round Down)", unit: "#", group: "Charge Cycles", formula: "IF(cycPerChg <= 0, 0, IF(cycPerChg < 1, 1, floor(cycPerChg)))" },
   { key: "incompCyc", label: "Incomplete Cycles", unit: "#", group: "Charge Cycles", formula: "IF(cycPerChg == 0, 0, CEIL(1 / cycPerChg) * cycPerChg - cycPerChgRD)", dec: 4 },
@@ -199,8 +126,6 @@ const defaultFormulas = () => [
   { key: "rchgPerHaul", label: "Recharges per Haul Cycle", unit: "#", group: "Recharge per Cycle", formula: "1 / effCycPerChg", dec: 4 },
   { key: "totRchgPerCyc", label: "Total Recharge Time/Cycle", unit: "min", group: "Recharge per Cycle", formula: "totRchgT * IF(cycPerChg < 1, 1, rchgPerHaul)" },
   { key: "totTravRchgPerCyc", label: "Travel to Recharge Time/Cycle", unit: "min", group: "Recharge per Cycle", formula: "T_travelToSwapChargerStationTime * CEIL(rchgPerHaul)" },
-
-  // ═══ 5. PRODUCTIVITY CALCS ═══
   { key: "swpRchgPerCyc", label: "Swap/Recharge Time per Cycle", unit: "min", section: "📊 TRUCK — Productivity", group: "Time Build-up", formula: "totRchgPerCyc" },
   { key: "effCycT", label: "Effective Cycle Time", unit: "min", group: "Time Build-up", formula: "T_spotLoadQueueDump + avgLoadedTravelTime + avgUnloadedTravelTime" },
   { key: "prodCycT", label: "Productive Cycle Time", unit: "min", group: "Time Build-up", formula: "effCycT / T_performanceEfficiency" },
@@ -214,8 +139,6 @@ const defaultFormulas = () => [
   { key: "calCycT", label: "Calendar Cycle Time", unit: "min", group: "Productivity Output", formula: "avCycIncChg / T_availability", hl: 1 },
   { key: "productivity", label: "Productivity", unit: "tph", group: "Productivity Output", formula: "T_payload / (calCycT / 60)", hl: 1 },
   { key: "effHrsDayAfter", label: "Effective Hours/Day (after charging)", unit: "hrs", group: "Productivity Output", formula: "24 * T_availability * uoaAfter * icEffIncTKPH * T_performanceEfficiency" },
-
-  // ═══ 6. TRUCK FLEET SIZING & SMU ═══
   { key: "trkCalHrs", label: "Truck Calendar Hours Required", unit: "hrs", section: "🚚 TRUCK — Fleet Sizing & SMU", group: "Fleet Sizing", formula: "totalRampMined / productivity" },
   { key: "trkReq", label: "Trucks Required (decimal)", unit: "#", group: "Fleet Sizing", formula: "trkCalHrs / calendarHours", dec: 2 },
   { key: "trkReqR", label: "Trucks Required (rounded)", unit: "#", group: "Fleet Sizing", formula: "CEIL(trkReq)", hl: 1 },
@@ -227,8 +150,6 @@ const defaultFormulas = () => [
   { key: "trkSmuDay", label: "Truck SMU per Day", unit: "hrs", group: "SMU Calculation", formula: "utHrsDay * T_utToSmuConversion" },
   { key: "trkSmuPer", label: "Truck SMU per Period", unit: "hrs", group: "SMU Calculation", formula: "trkSmuDay * calendarDays" },
   { key: "totTrkSmu", label: "Total Truck SMU Hours", unit: "hrs", group: "SMU Calculation", formula: "trkSmuPer * trkReq", hl: 1 },
-
-  // ═══ 7. BATTERY LIFECYCLE ═══
   { key: "netEngPerCyc", label: "Net Energy Usage per Cycle", unit: "kWh", section: "🔋 BATTERY — Lifecycle & Replacement", group: "Energy per Cycle", formula: "avgNetPower + (rchgPerHaul * T_travelToRechargeEnergy)" },
   { key: "eqLifeCycPerHaul", label: "Equiv Full Life Cycles per Haul", unit: "#", group: "Lifecycle Calcs", formula: "netEngPerCyc / T_nominalBatteryCapacityNew", dec: 6 },
   { key: "eqLifeCycDay", label: "Equiv Life Cycles per Day", unit: "#", group: "Lifecycle Calcs", formula: "eqLifeCycPerHaul * trkCycDay", dec: 4 },
@@ -238,8 +159,6 @@ const defaultFormulas = () => [
   { key: "totBatPerYr", label: "Total Batteries per Year", unit: "#", group: "Battery Replacement", formula: "batPerTrkPer * trkReq" },
   { key: "totReplBatCost", label: "Replacement Battery Cost/Period", unit: "AUD", group: "Battery Cost", formula: "T_powerSystemCost * batPerTrkPer", cur: 1 },
   { key: "batReplPerSmu", label: "Battery Replacement Cost/SMU", unit: "$/SMU", group: "Battery Cost", formula: "totReplBatCost / trkSmuPer", cur: 1 },
-
-  // ═══ 8. CHARGER INFRASTRUCTURE ═══
   { key: "chgDur", label: "Avg Charge Duration inc Connection", unit: "min", section: "⚡ CHARGER — Infrastructure", group: "Charger Demand", formula: "T_chargerQueueTime + T_chargerConnectionPositioningTime + actRchgT" },
   { key: "chgReqDec", label: "Connected Chargers Required", unit: "#", group: "Charger Demand", formula: "(trkRchgDay * trkReq * (1 + T_demandResponseAllowance)) / (T_chargerOperatingTime / 365 / (chgDur / 60))", dec: 2 },
   { key: "chgStaDec", label: "Charger Stations Required (decimal)", unit: "#", group: "Charger Stations", formula: "chgReqDec / T_numBatteriesPerStation", dec: 2 },
@@ -248,8 +167,6 @@ const defaultFormulas = () => [
   { key: "chgHrsReq", label: "Charger Hours Required", unit: "hrs", group: "Charger Cost", formula: "chgStaDec * T_avgChargerEffectiveHours * periodMultiplier" },
   { key: "chgCost", label: "Total Charger Cost per Period", unit: "AUD", group: "Charger Cost", formula: "chgHrsReq * T_totalChargerOandO", cur: 1 },
   { key: "chgCostPerTrkHr", label: "Charger Cost per Truck SMU Hr", unit: "$/hr", group: "Charger Cost", formula: "chgCost / totTrkSmu", cur: 1 },
-
-  // ═══ 9. COST SUMMARY — TRUCK ═══
   { key: "trkOpex", label: "Truck Opex (base)", unit: "AUD", section: "💰 SUMMARY — Truck Cost", group: "Truck Cost Rates", formula: "T_opexPerSmuHour * totTrkSmu", cur: 1 },
   { key: "trkCphrExc", label: "Truck Cost/Hr (O&O exc Cpx)", unit: "$/SMU", group: "Truck Cost Rates", formula: "T_opexPerSmuHour + batReplPerSmu + chgCostPerTrkHr", cur: 1 },
   { key: "trkCphrInc", label: "Truck Cost/Hr (O&O inc Cpx)", unit: "$/SMU", group: "Truck Cost Rates", formula: "trkCphrExc + T_capexPerSmuHour", cur: 1 },
@@ -257,9 +174,7 @@ const defaultFormulas = () => [
   { key: "trkPerTExc", label: "Truck Cost per Tonne (exc Cpx)", unit: "$/t", group: "Truck Cost Totals", formula: "totTrkExc / totalRampMined", cur: 1 },
   { key: "totTrk", label: "Total Truck Cost (inc Cpx)", unit: "AUD", group: "Truck Cost Totals", formula: "trkCphrInc * totTrkSmu", hl: 1, cur: 1 },
   { key: "trkPerT", label: "Truck Cost per Tonne (inc Cpx)", unit: "$/t", group: "Truck Cost Totals", formula: "totTrk / totalRampMined", cur: 1 },
-
-  // ═══ 10. GRAND TOTAL ═══
-  { key: "totExc", label: "Total Scenario Cost (exc Cpx)", unit: "AUD", section: "🏆 GRAND TOTAL — Digger + Truck", group: "Excluding Capex", formula: "totTrkExc + digOpxTotal + digRehandle", hl: 1, cur: 1 },
+  { key: "totExc", label: "Total Scenario Cost (exc Cpx)", unit: "AUD", section: "🏆 GRAND TOTAL", group: "Excluding Capex", formula: "totTrkExc + digOpxTotal + digRehandle", hl: 1, cur: 1 },
   { key: "totPerTExc", label: "Total Cost per Tonne (exc Cpx)", unit: "$/t", group: "Excluding Capex", formula: "totExc / totalMined", hl: 1, cur: 1 },
   { key: "totCost", label: "Total Scenario Cost (inc Cpx)", unit: "AUD", group: "Including Capex", formula: "totTrk + digCostActivity + digRehandle", hl: 1, cur: 1 },
   { key: "totPerT", label: "Total Cost per Tonne (inc Cpx)", unit: "$/t", group: "Including Capex", formula: "totCost / totalRampMined", hl: 1, cur: 1 },
@@ -270,81 +185,116 @@ function calcWithFormulas(inp, formulas) {
   const { totalMined, oreMined, totalRampMined, avgLoadedTravelTime, avgUnloadedTravelTime, avgNetPower, avgTkphDelay, schedPeriod, calendarDays, calendarHours, truck: T, digger: D, other: O } = inp;
   if (!totalMined || totalMined <= 0) return null;
   const pm = schedPeriod === "Quarterly" ? 0.25 : schedPeriod === "Monthly" ? 1 / 12 : 1;
-
-  // Build context with all inputs flattened
   const ctx = { totalMined, oreMined, totalRampMined, avgLoadedTravelTime, avgUnloadedTravelTime, avgNetPower, avgTkphDelay, calendarDays, calendarHours, periodMultiplier: pm };
-  // Prefix truck assumptions with T_, digger with D_, other with O_
   for (const [k, v] of Object.entries(T)) { if (typeof v === "number") ctx["T_" + k] = v; }
   for (const [k, v] of Object.entries(D)) { if (typeof v === "number") ctx["D_" + k] = v; }
   for (const [k, v] of Object.entries(O)) { if (typeof v === "number") ctx["O_" + k] = v; }
-
   const results = {};
-  // Evaluate formulas in order (they can reference earlier results)
-  for (const f of formulas) {
-    const val = evalExpr(f.formula, ctx);
-    results[f.key] = val;
-    ctx[f.key] = typeof val === "number" ? val : 0;
-  }
+  for (const f of formulas) { const val = evalExpr(f.formula, ctx); results[f.key] = val; ctx[f.key] = typeof val === "number" ? val : 0; }
   return results;
 }
 
-// ─── CSV PARSER ────────────────────────────────────────────────────────
-function parseCSV(text) { return text.split(/\r?\n/).filter(l => l.trim()).map(l => { const cells = []; let cur = "", q = false; for (let i = 0; i < l.length; i++) { if (l[i] === '"') q = !q; else if (l[i] === ',' && !q) { cells.push(cur.trim()); cur = ""; } else cur += l[i]; } cells.push(cur.trim()); return cells; }); }
-function parseScheduleCSV(text) {
-  const rows = parseCSV(text); if (rows.length < 2) return null;
-  const find = kws => rows.find(r => { const lb = (r[0]||"").toLowerCase().replace(/[^a-z0-9]/g,""); return kws.some(k => lb.includes(k.toLowerCase().replace(/[^a-z0-9]/g,""))); });
-  const hdr = rows[0]; let dsc = 2; for (let i = 1; i < hdr.length; i++) { if (/^\d/.test(hdr[i])) { dsc = i; break; } }
-  const pR = find(["period"]), dR = find(["days"]), hR = find(["hours"]), oR = find(["oremined"]), wR = find(["wastemined"]), tR = find(["totalmined"]);
-  const lR = find(["averageloadedtraveltime","loadedtravel"]), uR = find(["averageunloadedtraveltime","unloadedtravel"]);
-  const kR = find(["averagetkphdelay","tkphdelay"]), nR = find(["averagenetpower","netpower"]);
-  const nc = Math.max(...rows.map(r => r.length)) - dsc, periods = [];
-  for (let i = 0; i < nc; i++) { const c = dsc + i; const gv = r => { if (!r) return 0; const v = r[c]; if (!v) return 0; const n = parseFloat(v.replace(/,/g,"")); return isNaN(n)?0:n; }; const gs = r => r?(r[c]||""):"";
-    const ore = gv(oR), waste = gv(wR); let total = gv(tR); if (total===0 && (ore>0||waste>0)) total = ore+waste; const days = gv(dR)||91;
-    periods.push({ period: i+1, periodLabel: gs(pR)||`P${i+1}`, days, hours: gv(hR)||days*24, oreMined: ore, wasteMined: waste, totalMined: total, totalRampMined: total, avgLoadedTravelTime: gv(lR), avgUnloadedTravelTime: gv(uR), avgTkphDelay: gv(kR), avgNetPower: gv(nR), truckIdx: 0, diggerIdx: 0 }); }
-  return periods.filter(p => p.totalMined > 0 || p.avgNetPower > 0);
+// ─── GENERIC CSV PARSER ────────────────────────────────────────────────
+// Parses CSV into { rowLabels: [...], dataStartCol, numPeriods, getVal(rowLabel, periodIdx), getStr(rowLabel, periodIdx), allRowLabels }
+function parseCSV(text) {
+  return text.split(/\r?\n/).filter(l => l.trim()).map(l => {
+    const cells = []; let cur = "", q = false;
+    for (let i = 0; i < l.length; i++) { if (l[i] === '"') q = !q; else if (l[i] === ',' && !q) { cells.push(cur.trim()); cur = ""; } else cur += l[i]; }
+    cells.push(cur.trim()); return cells;
+  });
 }
 
-// ─── PROFESSIONAL DESIGN SYSTEM ────────────────────────────────────────
-const P = {
-  bg: "#f8f9fc", card: "#ffffff", input: "#f3f4f8",
-  bd: "#e0e3ea", bdS: "#c7cbd4",
-  pri: "#1d4ed8", priL: "#3b6cf4", priBg: "#eef2ff", priTx: "#1e3a8a",
-  tx: "#1a1f2e", txM: "#4b5563", txD: "#8992a3",
-  gn: "#0d7a5f", gnBg: "#ecfdf5", rd: "#c93131", rdBg: "#fef2f2",
-  bl: "#2563eb", blBg: "#eff6ff",
-  hdr: "#111827", hdrTx: "#f0f1f4",
-  secBg: "#f1f4f9", hlBg: "#e8eeff", hlTx: "#1e3a8a",
-};
+function parseGenericCSV(text) {
+  const rows = parseCSV(text);
+  if (rows.length < 2) return null;
+
+  // Detect data start column (first column header that looks like a period number or date)
+  const hdr = rows[0];
+  let dsc = 2;
+  for (let i = 1; i < hdr.length; i++) { if (/^\d/.test(hdr[i])) { dsc = i; break; } }
+
+  const numPeriods = Math.max(...rows.map(r => r.length)) - dsc;
+
+  // Build a map: normalised row label → row array
+  const rowMap = {};
+  const allLabels = [];
+  for (const r of rows) {
+    const rawLabel = (r[0] || "").trim();
+    if (!rawLabel) continue;
+    allLabels.push(rawLabel);
+    rowMap[rawLabel] = r;
+    // Also store normalised version for fuzzy matching
+    rowMap[rawLabel.toLowerCase().replace(/[^a-z0-9]/g, "")] = r;
+  }
+
+  const getVal = (label, periodIdx) => {
+    const row = rowMap[label] || rowMap[(label || "").toLowerCase().replace(/[^a-z0-9]/g, "")];
+    if (!row) return 0;
+    const v = row[dsc + periodIdx];
+    if (v === undefined || v === "") return 0;
+    const n = parseFloat(v.replace(/,/g, ""));
+    return isNaN(n) ? 0 : n;
+  };
+
+  const getStr = (label, periodIdx) => {
+    const row = rowMap[label] || rowMap[(label || "").toLowerCase().replace(/[^a-z0-9]/g, "")];
+    return row ? (row[dsc + periodIdx] || "") : "";
+  };
+
+  return { rowMap, allLabels, dsc, numPeriods, getVal, getStr };
+}
+
+// ─── DEFAULT FIELD MAPPINGS ────────────────────────────────────────────
+// Each "physical set" maps CSV row names → calculation input names
+const defaultFieldMappings = () => [
+  {
+    id: uid(), name: "Base Set",
+    fields: {
+      oreMined: "Ore Mined", wasteMined: "Waste Mined",
+      totalMined: "Total Mined", totalRampMined: "Total Mined",
+      avgLoadedTravelTime: "Average loaded travel time",
+      avgUnloadedTravelTime: "Average unloaded travel time",
+      avgTkphDelay: "Average TKPH delay",
+      avgNetPower: "Average Net Power",
+    }
+  },
+];
+
+// The calc input fields that each physical set must provide
+const PHYS_FIELDS = [
+  { key: "oreMined", label: "Ore Mined", unit: "t" },
+  { key: "wasteMined", label: "Waste Mined", unit: "t" },
+  { key: "totalMined", label: "Total Mined (tonnage driver)", unit: "t" },
+  { key: "totalRampMined", label: "Ramp Build Tonnes", unit: "t" },
+  { key: "avgLoadedTravelTime", label: "Loaded Travel Time", unit: "min" },
+  { key: "avgUnloadedTravelTime", label: "Unloaded Travel Time", unit: "min" },
+  { key: "avgTkphDelay", label: "TKPH Delay", unit: "min" },
+  { key: "avgNetPower", label: "Net Power", unit: "kWh" },
+];
+
+// ─── FLEET COMBO DEFINITION ───────────────────────────────────────────
+const defaultFleets = () => [
+  { id: uid(), name: "Fleet 1", truckIdx: 0, diggerIdx: 0, physicalSetIdx: 0 },
+];
+
+// ─── DESIGN SYSTEM ─────────────────────────────────────────────────────
+const P = { bg: "#f8f9fc", card: "#ffffff", input: "#f3f4f8", bd: "#e0e3ea", bdS: "#c7cbd4", pri: "#1d4ed8", priL: "#3b6cf4", priBg: "#eef2ff", priTx: "#1e3a8a", tx: "#1a1f2e", txM: "#4b5563", txD: "#8992a3", gn: "#0d7a5f", gnBg: "#ecfdf5", rd: "#c93131", rdBg: "#fef2f2", bl: "#2563eb", blBg: "#eff6ff", hdr: "#111827", hdrTx: "#f0f1f4", secBg: "#f1f4f9", hlBg: "#e8eeff", hlTx: "#1e3a8a" };
 const ff = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
 const mf = "'SF Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace";
-
-const ST = ({ children, icon }) => (
-  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 0 10px", marginTop: 24, borderBottom: `2px solid ${P.pri}`, marginBottom: 14 }}>
-    <span style={{ fontSize: 18 }}>{icon}</span>
-    <span style={{ color: P.pri, fontWeight: 700, fontSize: 15, fontFamily: ff }}>{children}</span>
-  </div>
-);
-const Btn = ({ children, onClick, color = P.pri, small, solid }) => (
-  <button onClick={onClick} style={{ padding: small ? "5px 12px" : "8px 20px", background: solid ? color : "transparent", border: `1.5px solid ${color}`, borderRadius: 7, color: solid ? "#fff" : color, fontFamily: ff, fontSize: 12, cursor: "pointer", fontWeight: 600, letterSpacing: 0.15, transition: "all 0.15s" }}>{children}</button>
-);
+const mClr = ["#1d4ed8", "#0d7a5f", "#c93131", "#7c3aed", "#be185d", "#0e7490"];
+const ST = ({ children, icon }) => (<div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 0 10px", marginTop: 20, borderBottom: `2px solid ${P.pri}`, marginBottom: 14 }}><span style={{ fontSize: 18 }}>{icon}</span><span style={{ color: P.pri, fontWeight: 700, fontSize: 15, fontFamily: ff }}>{children}</span></div>);
+const Btn = ({ children, onClick, color = P.pri, small, solid }) => (<button onClick={onClick} style={{ padding: small ? "5px 12px" : "8px 20px", background: solid ? color : "transparent", border: `1.5px solid ${color}`, borderRadius: 7, color: solid ? "#fff" : color, fontFamily: ff, fontSize: 12, cursor: "pointer", fontWeight: 600 }}>{children}</button>);
 const CompRow = ({ label, field, models, onChange, unit, type = "number", step, section }) => {
   if (section) return (<tr><td colSpan={models.length + 2} style={{ padding: "16px 14px 6px", color: P.pri, fontWeight: 700, fontSize: 13, borderBottom: `2px solid ${P.pri}20`, fontFamily: ff, background: P.secBg }}>{label}</td></tr>);
-  return (<tr style={{ borderBottom: `1px solid ${P.bd}` }}>
-    <td style={{ padding: "7px 14px", color: P.txM, fontSize: 13, fontFamily: ff, whiteSpace: "nowrap", position: "sticky", left: 0, background: P.card, zIndex: 1 }}>{label}</td>
-    <td style={{ padding: "7px 8px", color: P.txD, fontSize: 11, fontFamily: mf }}>{unit}</td>
-    {models.map((m, i) => (<td key={m.id || i} style={{ padding: "4px 6px" }}>
-      {type === "text" ? <input type="text" value={m[field] || ""} onChange={e => onChange(i, field, e.target.value)} style={{ width: "100%", minWidth: 115, padding: "6px 10px", background: P.input, border: `1px solid ${P.bd}`, borderRadius: 6, color: P.tx, fontFamily: ff, fontSize: 13 }} />
-        : <input type="number" value={m[field] ?? ""} onChange={e => onChange(i, field, parseFloat(e.target.value) || 0)} step={step || 0.01} style={{ width: "100%", minWidth: 105, padding: "6px 10px", background: P.input, border: `1px solid ${P.bd}`, borderRadius: 6, color: P.tx, fontFamily: mf, fontSize: 13, textAlign: "right" }} />}
-    </td>))}
-  </tr>);
+  return (<tr style={{ borderBottom: `1px solid ${P.bd}` }}><td style={{ padding: "7px 14px", color: P.txM, fontSize: 13, fontFamily: ff, whiteSpace: "nowrap", position: "sticky", left: 0, background: P.card, zIndex: 1 }}>{label}</td><td style={{ padding: "7px 8px", color: P.txD, fontSize: 11, fontFamily: mf }}>{unit}</td>{models.map((m, i) => (<td key={m.id || i} style={{ padding: "3px 6px" }}>{type === "text" ? <input type="text" value={m[field] || ""} onChange={e => onChange(i, field, e.target.value)} style={{ width: "100%", minWidth: 115, padding: "6px 10px", background: P.input, border: `1px solid ${P.bd}`, borderRadius: 6, color: P.tx, fontFamily: ff, fontSize: 13 }} /> : <input type="number" value={m[field] ?? ""} onChange={e => onChange(i, field, parseFloat(e.target.value) || 0)} step={step || 0.01} style={{ width: "100%", minWidth: 105, padding: "6px 10px", background: P.input, border: `1px solid ${P.bd}`, borderRadius: 6, color: P.tx, fontFamily: mf, fontSize: 13, textAlign: "right" }} />}</td>))}</tr>);
 };
-const mClr = ["#1d4ed8", "#0d7a5f", "#c93131", "#7c3aed", "#be185d", "#0e7490"];
+const cardS = { background: P.card, borderRadius: 10, border: `1px solid ${P.bd}`, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" };
+const selS = { padding: "6px 12px", background: P.input, border: `1px solid ${P.bd}`, borderRadius: 6, color: P.tx, fontFamily: ff, fontSize: 12 };
+const thS = { padding: "9px 10px", color: P.txM, textAlign: "left", fontSize: 11, fontWeight: 600 };
 
-// ─── ROW DEFS ────────────────────────────────────────────────────────────
 const truckRows = [
   { section: true, label: "Identity & TUM Parameters" },
-  { field: "truckName", label: "Truck Name", type: "text" },
-  { field: "payload", label: "Payload", unit: "t" }, { field: "powerSource", label: "Power Source", type: "text" },
+  { field: "truckName", label: "Truck Name", type: "text" }, { field: "payload", label: "Payload", unit: "t" }, { field: "powerSource", label: "Power Source", type: "text" },
   { field: "availability", label: "Availability", unit: "%", step: 0.01 }, { field: "useOfAvailability", label: "Use of Availability", unit: "%", step: 0.01 },
   { field: "operatingEfficiency", label: "Operating Efficiency", unit: "%", step: 0.01 }, { field: "utToSmuConversion", label: "UT → SMU Ratio", unit: "#" },
   { field: "spotLoadQueueDump", label: "Spot/Load/Queue/Dump", unit: "min" }, { field: "performanceEfficiency", label: "Performance Efficiency", unit: "%", step: 0.01 },
@@ -380,14 +330,19 @@ const diggerRows = [
   { field: "operatorCost", label: "Operator Cost", unit: "$/SMU" }, { field: "rehandleCostPerTonne", label: "Rehandle Cost per Tonne", unit: "$/t" },
 ];
 
-// ─── MAIN APP ──────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════
+//  MAIN APP
+// ═══════════════════════════════════════════════════════════════════════
 export default function App() {
   const [page, setPage] = useState("schedule");
   const [trucks, setTrucks] = useState([mkTruck(), mkTruckL()]);
   const [diggers, setDiggers] = useState([mkDigger(), mkDigger4()]);
   const [otherA, setOtherA] = useState(defaultOther);
   const [formulas, setFormulas] = useState(defaultFormulas);
-  const [schedule, setSchedule] = useState([]);
+  const [fieldMappings, setFieldMappings] = useState(defaultFieldMappings);
+  const [fleets, setFleets] = useState(defaultFleets);
+  const [csvData, setCsvData] = useState(null); // parsed generic CSV
+  const [csvRawLabels, setCsvRawLabels] = useState([]);
   const [schedPeriod, setSchedPeriod] = useState("Quarterly");
   const [uploadError, setUploadError] = useState("");
   const [unitMul, setUnitMul] = useState(1);
@@ -395,46 +350,130 @@ export default function App() {
   const [editingFormula, setEditingFormula] = useState(null);
   const [editText, setEditText] = useState("");
   const [testPeriodIdx, setTestPeriodIdx] = useState(0);
-  const [testTruckIdx, setTestTruckIdx] = useState(0);
-  const [testDiggerIdx, setTestDiggerIdx] = useState(0);
+  const [testFleetIdx, setTestFleetIdx] = useState(0);
   const fileRef = useRef();
 
+  // Manual schedule data (used when no CSV uploaded)
   const [manual, setManual] = useState([
-    { period: 1, periodLabel: "2032/Q2", days: 91, hours: 2184, oreMined: 0, wasteMined: 77261, totalMined: 77261, totalRampMined: 77261, avgLoadedTravelTime: 3.3, avgUnloadedTravelTime: 2.5, avgTkphDelay: 0, avgNetPower: 255.9, truckIdx: 0, diggerIdx: 0 },
-    { period: 2, periodLabel: "2032/Q3", days: 90, hours: 2160, oreMined: 0, wasteMined: 171091, totalMined: 171091, totalRampMined: 171091, avgLoadedTravelTime: 15.4, avgUnloadedTravelTime: 10.6, avgTkphDelay: 4.9, avgNetPower: 115.7, truckIdx: 0, diggerIdx: 0 },
-    { period: 3, periodLabel: "2032/Q4", days: 90, hours: 2160, oreMined: 0, wasteMined: 360855, totalMined: 360855, totalRampMined: 360855, avgLoadedTravelTime: 10.8, avgUnloadedTravelTime: 8.0, avgTkphDelay: 2.2, avgNetPower: 35.9, truckIdx: 0, diggerIdx: 0 },
+    { period: 1, periodLabel: "2032/Q2", days: 91, hours: 2184, oreMined: 0, wasteMined: 77261, totalMined: 77261, totalRampMined: 77261, avgLoadedTravelTime: 3.3, avgUnloadedTravelTime: 2.5, avgTkphDelay: 0, avgNetPower: 255.9 },
+    { period: 2, periodLabel: "2032/Q3", days: 90, hours: 2160, oreMined: 0, wasteMined: 171091, totalMined: 171091, totalRampMined: 171091, avgLoadedTravelTime: 15.4, avgUnloadedTravelTime: 10.6, avgTkphDelay: 4.9, avgNetPower: 115.7 },
+    { period: 3, periodLabel: "2032/Q4", days: 90, hours: 2160, oreMined: 0, wasteMined: 360855, totalMined: 360855, totalRampMined: 360855, avgLoadedTravelTime: 10.8, avgUnloadedTravelTime: 8.0, avgTkphDelay: 2.2, avgNetPower: 35.9 },
   ]);
 
-  const handleUpload = useCallback(e => { const f = e.target.files[0]; if (!f) return; setUploadError(""); const rd = new FileReader(); rd.onload = ev => { try { const p = parseScheduleCSV(ev.target.result); if (!p || !p.length) { setUploadError("Could not parse CSV."); return; } setSchedule(p); } catch (err) { setUploadError("Error: " + err.message); } }; rd.readAsText(f); }, []);
+  const handleUpload = useCallback(e => {
+    const f = e.target.files[0]; if (!f) return;
+    setUploadError("");
+    const rd = new FileReader();
+    rd.onload = ev => {
+      try {
+        const parsed = parseGenericCSV(ev.target.result);
+        if (!parsed || parsed.numPeriods < 1) { setUploadError("Could not parse CSV — no period columns found."); return; }
+        setCsvData(parsed);
+        setCsvRawLabels(parsed.allLabels);
+        setUploadError("");
+      } catch (err) { setUploadError("Error: " + err.message); }
+    };
+    rd.readAsText(f);
+  }, []);
 
-  const src = schedule.length > 0 ? schedule : manual;
-  const setSrc = schedule.length > 0 ? setSchedule : setManual;
+  // Resolve period data for a given fleet using field mappings
+  const getPeriodDataForFleet = useCallback((periodIdx, fleet) => {
+    const mapping = fieldMappings[fleet.physicalSetIdx] || fieldMappings[0];
+    if (!mapping) return null;
 
-  const results = useMemo(() => src.map(p => {
-    const ti = Math.min(p.truckIdx || 0, trucks.length - 1), di = Math.min(p.diggerIdx || 0, diggers.length - 1);
-    return { inp: p, trkN: trucks[ti]?.truckName, digN: diggers[di]?.diggerName,
-      res: calcWithFormulas({ totalMined: p.totalMined * unitMul, oreMined: p.oreMined * unitMul, totalRampMined: (p.totalRampMined || p.totalMined) * unitMul, avgLoadedTravelTime: p.avgLoadedTravelTime, avgUnloadedTravelTime: p.avgUnloadedTravelTime, avgNetPower: p.avgNetPower, avgTkphDelay: p.avgTkphDelay, schedPeriod, calendarDays: p.days, calendarHours: p.hours, truck: trucks[ti], digger: diggers[di], other: otherA }, formulas) };
-  }), [src, trucks, diggers, otherA, schedPeriod, unitMul, formulas]);
+    if (csvData) {
+      // Read from uploaded CSV using mapping
+      const result = { period: periodIdx + 1, periodLabel: csvData.getStr("Period", periodIdx) || `P${periodIdx + 1}` };
+      result.days = csvData.getVal("Days", periodIdx) || 91;
+      result.hours = csvData.getVal("Hours", periodIdx) || result.days * 24;
+      for (const pf of PHYS_FIELDS) {
+        const csvLabel = mapping.fields[pf.key] || "";
+        result[pf.key] = csvLabel ? csvData.getVal(csvLabel, periodIdx) : 0;
+      }
+      return result;
+    } else {
+      // Use manual data (ignoring field mapping — manual is direct)
+      return manual[periodIdx] || null;
+    }
+  }, [csvData, fieldMappings, manual]);
 
-  const totals = useMemo(() => { const t = { m: 0, c: 0 }; results.forEach(({ inp, res }) => { if (!res) return; t.m += (inp.totalMined * unitMul) || 0; t.c += res.totCost || 0; }); t.cpt = t.m > 0 ? t.c / t.m : 0; return t; }, [results, unitMul]);
+  // Number of periods
+  const numPeriods = csvData ? csvData.numPeriods : manual.length;
 
+  // Calculate results: for each period × each fleet
+  const results = useMemo(() => {
+    const allResults = [];
+    for (let pi = 0; pi < numPeriods; pi++) {
+      for (const fleet of fleets) {
+        const pd = getPeriodDataForFleet(pi, fleet);
+        if (!pd) continue;
+        const ti = Math.min(fleet.truckIdx, trucks.length - 1);
+        const di = Math.min(fleet.diggerIdx, diggers.length - 1);
+        const res = calcWithFormulas({
+          totalMined: (pd.totalMined || 0) * unitMul,
+          oreMined: (pd.oreMined || 0) * unitMul,
+          totalRampMined: (pd.totalRampMined || pd.totalMined || 0) * unitMul,
+          avgLoadedTravelTime: pd.avgLoadedTravelTime || 0,
+          avgUnloadedTravelTime: pd.avgUnloadedTravelTime || 0,
+          avgNetPower: pd.avgNetPower || 0,
+          avgTkphDelay: pd.avgTkphDelay || 0,
+          schedPeriod, calendarDays: pd.days || 91, calendarHours: pd.hours || 2184,
+          truck: trucks[ti], digger: diggers[di], other: otherA,
+        }, formulas);
+        allResults.push({
+          periodIdx: pi, periodLabel: pd.periodLabel || `P${pi + 1}`,
+          fleet, fleetName: fleet.name,
+          truckName: trucks[ti]?.truckName, diggerName: diggers[di]?.diggerName,
+          equipKey: `${fleet.truckIdx}-${fleet.diggerIdx}`, // for grouping same equipment
+          res, pd,
+        });
+      }
+    }
+    return allResults;
+  }, [numPeriods, fleets, trucks, diggers, otherA, formulas, schedPeriod, unitMul, getPeriodDataForFleet]);
+
+  // Group results by equipment key for combined reporting
+  const equipGroups = useMemo(() => {
+    const groups = {};
+    for (const r of results) {
+      if (!groups[r.equipKey]) groups[r.equipKey] = { key: r.equipKey, truckName: r.truckName, diggerName: r.diggerName, fleetNames: [], results: [] };
+      if (!groups[r.equipKey].fleetNames.includes(r.fleetName)) groups[r.equipKey].fleetNames.push(r.fleetName);
+      groups[r.equipKey].results.push(r);
+    }
+    return Object.values(groups);
+  }, [results]);
+
+  // Totals
+  const totals = useMemo(() => {
+    const t = { m: 0, c: 0 };
+    results.forEach(r => { if (!r.res) return; t.m += r.res.totCost ? ((r.pd?.totalMined || 0) * unitMul) : 0; t.c += r.res.totCost || 0; });
+    t.cpt = t.m > 0 ? t.c / t.m : 0;
+    return t;
+  }, [results, unitMul]);
+
+  // Test result for formula editor
   const testResult = useMemo(() => {
-    const p = src[testPeriodIdx] || src[0]; if (!p) return null;
-    const ti = Math.min(testTruckIdx, trucks.length - 1), di = Math.min(testDiggerIdx, diggers.length - 1);
-    return calcWithFormulas({ totalMined: p.totalMined * unitMul, oreMined: p.oreMined * unitMul, totalRampMined: (p.totalRampMined || p.totalMined) * unitMul, avgLoadedTravelTime: p.avgLoadedTravelTime, avgUnloadedTravelTime: p.avgUnloadedTravelTime, avgNetPower: p.avgNetPower, avgTkphDelay: p.avgTkphDelay, schedPeriod, calendarDays: p.days, calendarHours: p.hours, truck: trucks[ti], digger: diggers[di], other: otherA }, formulas);
-  }, [src, testPeriodIdx, testTruckIdx, testDiggerIdx, trucks, diggers, otherA, schedPeriod, unitMul, formulas]);
+    const fleet = fleets[testFleetIdx] || fleets[0]; if (!fleet) return null;
+    const pd = getPeriodDataForFleet(testPeriodIdx, fleet); if (!pd) return null;
+    const ti = Math.min(fleet.truckIdx, trucks.length - 1), di = Math.min(fleet.diggerIdx, diggers.length - 1);
+    return calcWithFormulas({ totalMined: (pd.totalMined || 0) * unitMul, oreMined: (pd.oreMined || 0) * unitMul, totalRampMined: (pd.totalRampMined || pd.totalMined || 0) * unitMul, avgLoadedTravelTime: pd.avgLoadedTravelTime || 0, avgUnloadedTravelTime: pd.avgUnloadedTravelTime || 0, avgNetPower: pd.avgNetPower || 0, avgTkphDelay: pd.avgTkphDelay || 0, schedPeriod, calendarDays: pd.days || 91, calendarHours: pd.hours || 2184, truck: trucks[ti], digger: diggers[di], other: otherA }, formulas);
+  }, [testPeriodIdx, testFleetIdx, fleets, trucks, diggers, otherA, formulas, schedPeriod, unitMul, getPeriodDataForFleet]);
 
+  // Updaters
   const updT = (i, f, v) => setTrucks(p => { const n = [...p]; n[i] = { ...n[i], [f]: v }; return n; });
   const updD = (i, f, v) => setDiggers(p => { const n = [...p]; n[i] = { ...n[i], [f]: v }; return n; });
   const uO = (k, v) => setOtherA(p => ({ ...p, [k]: v }));
-  const addP = () => setSrc(p => [...p, { period: p.length + 1, periodLabel: `P${p.length + 1}`, days: 91, hours: 2184, oreMined: 0, wasteMined: 0, totalMined: 0, totalRampMined: 0, avgLoadedTravelTime: 10, avgUnloadedTravelTime: 8, avgTkphDelay: 0, avgNetPower: 150, truckIdx: 0, diggerIdx: 0 }]);
-  const updP = (i, k, v) => setSrc(p => { const n = [...p]; n[i] = { ...n[i], [k]: v }; if (k === "oreMined" || k === "wasteMined") { n[i].totalMined = (n[i].oreMined || 0) + (n[i].wasteMined || 0); n[i].totalRampMined = n[i].totalMined; } if (k === "days") n[i].hours = v * 24; return n; });
+  const updFleet = (i, k, v) => setFleets(p => { const n = [...p]; n[i] = { ...n[i], [k]: v }; return n; });
+  const updMapping = (setIdx, fieldKey, csvLabel) => setFieldMappings(p => { const n = [...p]; n[setIdx] = { ...n[setIdx], fields: { ...n[setIdx].fields, [fieldKey]: csvLabel } }; return n; });
+  const addP = () => setManual(p => [...p, { period: p.length + 1, periodLabel: `P${p.length + 1}`, days: 91, hours: 2184, oreMined: 0, wasteMined: 0, totalMined: 0, totalRampMined: 0, avgLoadedTravelTime: 10, avgUnloadedTravelTime: 8, avgTkphDelay: 0, avgNetPower: 150 }]);
+  const updPM = (i, k, v) => setManual(p => { const n = [...p]; n[i] = { ...n[i], [k]: v }; if (k === "oreMined" || k === "wasteMined") { n[i].totalMined = (n[i].oreMined || 0) + (n[i].wasteMined || 0); n[i].totalRampMined = n[i].totalMined; } if (k === "days") n[i].hours = v * 24; return n; });
   const updateFormula = (key, nf) => { setFormulas(prev => prev.map(f => f.key === key ? { ...f, formula: nf } : f)); setEditingFormula(null); };
   const addFormula = () => { const k = "custom_" + Date.now(); setFormulas(prev => [...prev, { key: k, label: "New Variable", unit: "", formula: "0", section: "🔧 CUSTOM" }]); setEditingFormula(k); setEditText("0"); };
-  const removeFormula = (key) => setFormulas(prev => prev.filter(f => f.key !== key));
 
   const navs = [
     { id: "schedule", label: "Schedule", icon: "📅" },
+    { id: "mapping", label: "Field Mapping", icon: "🔗" },
+    { id: "fleets", label: "Fleet Combos", icon: "🏗️" },
     { id: "results", label: "Results", icon: "📊" },
     { id: "formulas", label: "Formulas", icon: "🧮" },
     { id: "truck", label: "Trucks", icon: "🚛" },
@@ -442,40 +481,27 @@ export default function App() {
     { id: "other", label: "Settings", icon: "⚙️" },
   ];
 
-  const cardStyle = { background: P.card, borderRadius: 10, border: `1px solid ${P.bd}`, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" };
-  const selStyle = { padding: "6px 12px", background: P.input, border: `1px solid ${P.bd}`, borderRadius: 6, color: P.tx, fontFamily: ff, fontSize: 12 };
-  const thStyle = { padding: "9px 10px", color: P.txM, textAlign: "left", fontSize: 11, fontWeight: 600 };
-  const inpStyle = (hl) => ({ padding: "5px 8px", background: P.input, border: `1px solid ${P.bd}`, borderRadius: 5, color: hl ? P.pri : P.tx, fontFamily: mf, fontSize: 12, textAlign: "right", fontWeight: hl ? 700 : 400 });
-
   return (
     <div style={{ minHeight: "100vh", background: P.bg, color: P.tx, fontFamily: ff }}>
       <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 
-      {/* ══ HEADER ══ */}
+      {/* HEADER */}
       <div style={{ background: P.hdr, padding: "14px 32px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
           <div style={{ width: 38, height: 38, borderRadius: 9, background: "linear-gradient(135deg, #1d4ed8, #3b82f6)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 19 }}>⛏️</div>
-          <div>
-            <h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: P.hdrTx, letterSpacing: -0.3 }}>Mining Fleet Cost Engine</h1>
-            <p style={{ margin: 0, color: "#9ca3af", fontSize: 12 }}>Multi-period · Multi-model · Editable Formulas</p>
-          </div>
+          <div><h1 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: P.hdrTx }}>Mining Fleet Cost Engine</h1><p style={{ margin: 0, color: "#9ca3af", fontSize: 12 }}>Multi-Fleet · Field Mapping · Editable Formulas</p></div>
         </div>
-        {results.length > 0 && results[0].res && (
-          <div style={{ display: "flex", gap: 24 }}>
-            <div style={{ textAlign: "right" }}><div style={{ color: "#9ca3af", fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>Cost / Tonne</div><div style={{ color: "#60a5fa", fontSize: 22, fontWeight: 800, fontFamily: mf }}>{fmtC2(totals.cpt)}</div></div>
-            <div style={{ width: 1, height: 36, background: "#374151" }} />
-            <div style={{ textAlign: "right" }}><div style={{ color: "#9ca3af", fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>Total Cost</div><div style={{ color: P.hdrTx, fontSize: 17, fontWeight: 700, fontFamily: mf }}>{fmtCur(totals.c)}</div></div>
-          </div>
-        )}
+        {totals.c > 0 && (<div style={{ display: "flex", gap: 24 }}>
+          <div style={{ textAlign: "right" }}><div style={{ color: "#9ca3af", fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>Cost / Tonne</div><div style={{ color: "#60a5fa", fontSize: 22, fontWeight: 800, fontFamily: mf }}>{fmtC2(totals.cpt)}</div></div>
+          <div style={{ width: 1, height: 36, background: "#374151" }} />
+          <div style={{ textAlign: "right" }}><div style={{ color: "#9ca3af", fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>Total Cost</div><div style={{ color: P.hdrTx, fontSize: 17, fontWeight: 700, fontFamily: mf }}>{fmtCur(totals.c)}</div></div>
+        </div>)}
       </div>
 
-      {/* ══ NAV ══ */}
+      {/* NAV */}
       <div style={{ display: "flex", padding: "0 32px", background: P.card, borderBottom: `1px solid ${P.bd}`, overflowX: "auto" }}>
-        {navs.map(n => (<button key={n.id} onClick={() => setPage(n.id)} style={{ padding: "13px 22px", background: "transparent", border: "none", borderBottom: page === n.id ? `3px solid ${P.pri}` : "3px solid transparent", color: page === n.id ? P.pri : P.txD, fontFamily: ff, fontSize: 13, fontWeight: page === n.id ? 700 : 500, cursor: "pointer", whiteSpace: "nowrap", transition: "all 0.15s" }}>
-          <span style={{ marginRight: 7 }}>{n.icon}</span>{n.label}
-          {n.id === "truck" && <span style={{ marginLeft: 6, background: P.priBg, color: P.pri, borderRadius: 10, padding: "2px 8px", fontSize: 10, fontWeight: 700 }}>{trucks.length}</span>}
-          {n.id === "digger" && <span style={{ marginLeft: 6, background: P.priBg, color: P.pri, borderRadius: 10, padding: "2px 8px", fontSize: 10, fontWeight: 700 }}>{diggers.length}</span>}
-          {n.id === "formulas" && <span style={{ marginLeft: 6, background: P.blBg, color: P.bl, borderRadius: 10, padding: "2px 8px", fontSize: 10, fontWeight: 700 }}>{formulas.length}</span>}
+        {navs.map(n => (<button key={n.id} onClick={() => setPage(n.id)} style={{ padding: "13px 18px", background: "transparent", border: "none", borderBottom: page === n.id ? `3px solid ${P.pri}` : "3px solid transparent", color: page === n.id ? P.pri : P.txD, fontFamily: ff, fontSize: 13, fontWeight: page === n.id ? 700 : 500, cursor: "pointer", whiteSpace: "nowrap" }}>
+          <span style={{ marginRight: 6 }}>{n.icon}</span>{n.label}
         </button>))}
       </div>
 
@@ -483,69 +509,186 @@ export default function App() {
 
         {/* ══ SCHEDULE ══ */}
         {page === "schedule" && (<div>
-          <ST icon="📤">Upload / Configure Schedule</ST>
-          <div style={{ ...cardStyle, padding: 18, marginBottom: 18 }}>
+          <ST icon="📤">Upload Production Schedule</ST>
+          <div style={{ ...cardS, padding: 18, marginBottom: 18 }}>
             <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
               <input ref={fileRef} type="file" accept=".csv,.txt" onChange={handleUpload} style={{ color: P.tx, fontSize: 12 }} />
-              <select value={schedPeriod} onChange={e => setSchedPeriod(e.target.value)} style={selStyle}><option value="Yearly">Yearly</option><option value="Quarterly">Quarterly</option><option value="Monthly">Monthly</option></select>
-              <select value={unitMul} onChange={e => setUnitMul(Number(e.target.value))} style={selStyle}><option value={1}>Tonnes</option><option value={1000}>kt (×1000)</option><option value={1000000}>Mt (×1M)</option></select>
-              {schedule.length > 0 && <Btn color={P.rd} small onClick={() => { setSchedule([]); if (fileRef.current) fileRef.current.value = ""; }}>Clear Upload</Btn>}
+              <select value={schedPeriod} onChange={e => setSchedPeriod(e.target.value)} style={selS}><option value="Yearly">Yearly</option><option value="Quarterly">Quarterly</option><option value="Monthly">Monthly</option></select>
+              <select value={unitMul} onChange={e => setUnitMul(Number(e.target.value))} style={selS}><option value={1}>Tonnes</option><option value={1000}>kt (×1000)</option><option value={1000000}>Mt (×1M)</option></select>
+              {csvData && <Btn color={P.rd} small onClick={() => { setCsvData(null); setCsvRawLabels([]); if (fileRef.current) fileRef.current.value = ""; }}>Clear Upload</Btn>}
             </div>
-            {uploadError && <p style={{ color: P.rd, fontSize: 12, marginTop: 8, fontWeight: 500 }}>{uploadError}</p>}
-            {schedule.length > 0 && <p style={{ color: P.gn, fontSize: 12, marginTop: 8, fontWeight: 600 }}>✓ {schedule.length} periods loaded</p>}
+            {uploadError && <p style={{ color: P.rd, fontSize: 12, marginTop: 8 }}>{uploadError}</p>}
+            {csvData && <p style={{ color: P.gn, fontSize: 12, marginTop: 8, fontWeight: 600 }}>✓ {csvData.numPeriods} periods loaded · {csvData.allLabels.length} rows detected. Go to <b>Field Mapping</b> to configure which rows drive each fleet.</p>}
           </div>
-          <div style={{ ...cardStyle, overflowX: "auto" }}>
+
+          {!csvData && (<div>
+            <ST icon="✏️">Manual Schedule Entry</ST>
+            <div style={{ ...cardS, overflowX: "auto" }}>
+              <table style={{ borderCollapse: "collapse", fontFamily: ff, fontSize: 12, width: "100%" }}>
+                <thead><tr style={{ background: P.secBg, borderBottom: `2px solid ${P.bdS}` }}>
+                  {["#", "Period", "Days", "Hrs", "Ore Mined", "Waste Mined", "Total Mined", "Loaded TT", "Unloaded TT", "TKPH Delay", "Net Power"].map((h, i) => (<th key={i} style={{ ...thS, textAlign: i > 3 ? "right" : "left" }}>{h}</th>))}
+                  <th />
+                </tr></thead>
+                <tbody>{manual.map((p, idx) => (
+                  <tr key={idx} style={{ borderBottom: `1px solid ${P.bd}`, background: idx % 2 ? P.input + "55" : "transparent" }}>
+                    <td style={{ padding: "7px 10px", color: P.txD }}>{p.period}</td>
+                    {[["periodLabel", "t"], ["days", "n"], ["hours", "n"], ["oreMined", "n"], ["wasteMined", "n"], ["totalMined", "n"], ["avgLoadedTravelTime", "n"], ["avgUnloadedTravelTime", "n"], ["avgTkphDelay", "n"], ["avgNetPower", "n"]].map(([k, t]) => (
+                      <td key={k} style={{ padding: "5px 6px" }}>
+                        <input type={t === "t" ? "text" : "number"} value={p[k]} onChange={e => updPM(idx, k, t === "t" ? e.target.value : parseFloat(e.target.value) || 0)}
+                          style={{ width: t === "t" ? 75 : 85, padding: "5px 8px", background: P.input, border: `1px solid ${P.bd}`, borderRadius: 5, color: k === "totalMined" ? P.pri : P.tx, fontFamily: mf, fontSize: 12, textAlign: t === "t" ? "left" : "right", fontWeight: k === "totalMined" ? 700 : 400 }} />
+                      </td>
+                    ))}
+                    <td>{manual.length > 1 && <button onClick={() => setManual(p => p.filter((_, i) => i !== idx))} style={{ background: P.rdBg, border: `1px solid ${P.rd}22`, borderRadius: 5, color: P.rd, cursor: "pointer", padding: "2px 8px" }}>×</button>}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+            <div style={{ marginTop: 12 }}><Btn onClick={addP} solid>+ Add Period</Btn></div>
+          </div>)}
+        </div>)}
+
+        {/* ══ FIELD MAPPING ══ */}
+        {page === "mapping" && (<div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <ST icon="🔗">Field Mapping — Physical Sets</ST>
+            <Btn onClick={() => setFieldMappings(p => [...p, { id: uid(), name: `Set ${p.length + 1}`, fields: { ...PHYS_FIELDS.reduce((a, f) => ({ ...a, [f.key]: "" }), {}) } }])} solid>+ Add Physical Set</Btn>
+          </div>
+          <p style={{ color: P.txM, fontSize: 13, marginBottom: 16 }}>
+            Map CSV row labels to calculation inputs for each physical set. Each fleet combo uses one physical set. {csvData ? `${csvRawLabels.length} CSV rows available.` : "Upload a CSV first to see available row labels."}
+          </p>
+
+          <div style={{ ...cardS, overflowX: "auto" }}>
             <table style={{ borderCollapse: "collapse", fontFamily: ff, fontSize: 12, width: "100%" }}>
               <thead><tr style={{ background: P.secBg, borderBottom: `2px solid ${P.bdS}` }}>
-                {["#", "Period", "Days", "Hrs", "Ore Mined", "Waste Mined", "Total Mined", "Loaded TT", "Unloaded TT", "TKPH Delay", "Net Power", "Truck Model", "Digger Model"].map((h, i) => (<th key={i} style={{ ...thStyle, textAlign: i > 3 && i < 11 ? "right" : "left" }}>{h}</th>))}
-                {!schedule.length && <th />}
+                <th style={{ ...thS, minWidth: 180 }}>Calculation Input</th>
+                <th style={{ ...thS, minWidth: 50 }}>Unit</th>
+                {fieldMappings.map((m, mi) => (
+                  <th key={m.id} style={{ ...thS, minWidth: 200 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between" }}>
+                      <input type="text" value={m.name} onChange={e => setFieldMappings(p => { const n = [...p]; n[mi] = { ...n[mi], name: e.target.value }; return n; })}
+                        style={{ padding: "4px 8px", background: P.input, border: `1px solid ${P.bd}`, borderRadius: 5, color: mClr[mi % mClr.length], fontFamily: ff, fontSize: 12, fontWeight: 700, width: 120 }} />
+                      {fieldMappings.length > 1 && <button onClick={() => setFieldMappings(p => p.filter((_, i) => i !== mi))} style={{ background: P.rdBg, border: `1px solid ${P.rd}22`, borderRadius: 4, color: P.rd, cursor: "pointer", padding: "2px 6px", fontSize: 11 }}>×</button>}
+                    </div>
+                  </th>
+                ))}
               </tr></thead>
-              <tbody>{src.map((p, idx) => { const isM = !schedule.length; const mkI = (k, t) => isM ? <input type={t === "t" ? "text" : "number"} value={p[k]} onChange={e => updP(idx, k, t === "t" ? e.target.value : parseFloat(e.target.value) || 0)} style={{ width: t === "t" ? 75 : 85, ...inpStyle(k === "totalMined") }} /> : <span style={{ fontFamily: mf, fontSize: 12, color: k === "totalMined" ? P.pri : P.tx, fontWeight: k === "totalMined" ? 700 : 400 }}>{typeof p[k] === "number" ? fmt(p[k], k.includes("avg") ? 1 : 0) : p[k]}</span>;
-                return (<tr key={idx} style={{ borderBottom: `1px solid ${P.bd}`, background: idx % 2 ? P.input + "55" : "transparent" }}>
-                  <td style={{ padding: "7px 10px", color: P.txD, fontWeight: 500 }}>{p.period}</td>
-                  <td style={{ padding: "7px 8px" }}>{mkI("periodLabel", "t")}</td><td style={{ padding: "7px 8px" }}>{mkI("days", "n")}</td><td style={{ padding: "7px 8px" }}>{mkI("hours", "n")}</td>
-                  <td style={{ padding: "7px 8px" }}>{mkI("oreMined", "n")}</td><td style={{ padding: "7px 8px" }}>{mkI("wasteMined", "n")}</td><td style={{ padding: "7px 8px" }}>{mkI("totalMined", "n")}</td>
-                  <td style={{ padding: "7px 8px" }}>{mkI("avgLoadedTravelTime", "n")}</td><td style={{ padding: "7px 8px" }}>{mkI("avgUnloadedTravelTime", "n")}</td>
-                  <td style={{ padding: "7px 8px" }}>{mkI("avgTkphDelay", "n")}</td><td style={{ padding: "7px 8px" }}>{mkI("avgNetPower", "n")}</td>
-                  <td style={{ padding: "5px 6px" }}><select value={p.truckIdx || 0} onChange={e => updP(idx, "truckIdx", parseInt(e.target.value))} style={{ ...selStyle, width: 125, color: mClr[(p.truckIdx || 0) % mClr.length], fontWeight: 600, fontSize: 11 }}>{trucks.map((t, ti) => <option key={ti} value={ti}>{t.truckName}</option>)}</select></td>
-                  <td style={{ padding: "5px 6px" }}><select value={p.diggerIdx || 0} onChange={e => updP(idx, "diggerIdx", parseInt(e.target.value))} style={{ ...selStyle, width: 125, color: mClr[(p.diggerIdx || 0) % mClr.length], fontWeight: 600, fontSize: 11 }}>{diggers.map((d, di) => <option key={di} value={di}>{d.diggerName}</option>)}</select></td>
-                  {isM && <td>{src.length > 1 && <button onClick={() => setSrc(p => p.filter((_, i) => i !== idx))} style={{ background: P.rdBg, border: `1px solid ${P.rd}22`, borderRadius: 5, color: P.rd, cursor: "pointer", fontSize: 14, fontWeight: 700, padding: "2px 8px" }}>×</button>}</td>}
-                </tr>); })}</tbody>
+              <tbody>
+                {PHYS_FIELDS.map(pf => (
+                  <tr key={pf.key} style={{ borderBottom: `1px solid ${P.bd}` }}>
+                    <td style={{ padding: "8px 14px", color: P.txM, fontWeight: 500 }}>{pf.label}</td>
+                    <td style={{ padding: "8px 8px", color: P.txD, fontSize: 11, fontFamily: mf }}>{pf.unit}</td>
+                    {fieldMappings.map((m, mi) => (
+                      <td key={m.id} style={{ padding: "4px 6px" }}>
+                        {csvData ? (
+                          <select value={m.fields[pf.key] || ""} onChange={e => updMapping(mi, pf.key, e.target.value)}
+                            style={{ ...selS, width: "100%", minWidth: 160, color: m.fields[pf.key] ? P.tx : P.txD }}>
+                            <option value="">— Select CSV row —</option>
+                            {csvRawLabels.map(l => <option key={l} value={l}>{l}</option>)}
+                          </select>
+                        ) : (
+                          <input type="text" value={m.fields[pf.key] || ""} onChange={e => updMapping(mi, pf.key, e.target.value)} placeholder="CSV row label..."
+                            style={{ width: "100%", minWidth: 160, padding: "6px 10px", background: P.input, border: `1px solid ${P.bd}`, borderRadius: 6, color: P.tx, fontFamily: ff, fontSize: 12 }} />
+                        )}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
             </table>
           </div>
-          {!schedule.length && <div style={{ marginTop: 14 }}><Btn onClick={addP} solid>+ Add Period</Btn></div>}
+        </div>)}
+
+        {/* ══ FLEET COMBOS ══ */}
+        {page === "fleets" && (<div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <ST icon="🏗️">Fleet Combinations</ST>
+            <Btn onClick={() => setFleets(p => [...p, { id: uid(), name: `Fleet ${p.length + 1}`, truckIdx: 0, diggerIdx: 0, physicalSetIdx: 0 }])} solid>+ Add Fleet</Btn>
+          </div>
+          <p style={{ color: P.txM, fontSize: 13, marginBottom: 16 }}>
+            Define each fleet combo: which digger, which truck, and which physical set drives its tonnage and productivity metrics. Fleets using the same digger+truck are combined in reporting.
+          </p>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 16 }}>
+            {fleets.map((fl, fi) => {
+              const trk = trucks[Math.min(fl.truckIdx, trucks.length - 1)];
+              const dig = diggers[Math.min(fl.diggerIdx, diggers.length - 1)];
+              const physSet = fieldMappings[Math.min(fl.physicalSetIdx, fieldMappings.length - 1)];
+              return (
+                <div key={fl.id} style={{ ...cardS, padding: 20 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                    <input type="text" value={fl.name} onChange={e => updFleet(fi, "name", e.target.value)}
+                      style={{ padding: "6px 10px", background: P.input, border: `1px solid ${P.bd}`, borderRadius: 6, color: mClr[fi % mClr.length], fontFamily: ff, fontSize: 15, fontWeight: 700, width: 180 }} />
+                    {fleets.length > 1 && <button onClick={() => setFleets(p => p.filter((_, i) => i !== fi))} style={{ background: P.rdBg, border: `1px solid ${P.rd}22`, borderRadius: 5, color: P.rd, cursor: "pointer", padding: "4px 10px", fontSize: 12 }}>Remove</button>}
+                  </div>
+
+                  <div style={{ marginBottom: 10 }}>
+                    <label style={{ display: "block", color: P.txD, fontSize: 11, fontWeight: 600, marginBottom: 4 }}>Truck Model</label>
+                    <select value={fl.truckIdx} onChange={e => updFleet(fi, "truckIdx", parseInt(e.target.value))} style={{ ...selS, width: "100%" }}>
+                      {trucks.map((t, ti) => <option key={ti} value={ti}>{t.truckName}</option>)}
+                    </select>
+                  </div>
+                  <div style={{ marginBottom: 10 }}>
+                    <label style={{ display: "block", color: P.txD, fontSize: 11, fontWeight: 600, marginBottom: 4 }}>Digger Model</label>
+                    <select value={fl.diggerIdx} onChange={e => updFleet(fi, "diggerIdx", parseInt(e.target.value))} style={{ ...selS, width: "100%" }}>
+                      {diggers.map((d, di) => <option key={di} value={di}>{d.diggerName}</option>)}
+                    </select>
+                  </div>
+                  <div style={{ marginBottom: 10 }}>
+                    <label style={{ display: "block", color: P.txD, fontSize: 11, fontWeight: 600, marginBottom: 4 }}>Physical Set (tonnage & productivity driver)</label>
+                    <select value={fl.physicalSetIdx} onChange={e => updFleet(fi, "physicalSetIdx", parseInt(e.target.value))} style={{ ...selS, width: "100%" }}>
+                      {fieldMappings.map((m, mi) => <option key={mi} value={mi}>{m.name}</option>)}
+                    </select>
+                  </div>
+                  <div style={{ padding: "10px 12px", background: P.secBg, borderRadius: 6, fontSize: 11, color: P.txM }}>
+                    <b>{trk?.truckName}</b> + <b>{dig?.diggerName}</b><br />Using: <span style={{ color: mClr[fl.physicalSetIdx % mClr.length], fontWeight: 600 }}>{physSet?.name}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Show grouping preview */}
+          {equipGroups.length > 0 && (<div style={{ marginTop: 24 }}>
+            <ST icon="📋">Reporting Groups Preview</ST>
+            {equipGroups.map(g => (
+              <div key={g.key} style={{ ...cardS, padding: 14, marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div><b style={{ color: P.pri }}>{g.truckName}</b> + <b style={{ color: P.gn }}>{g.diggerName}</b></div>
+                <div style={{ color: P.txD, fontSize: 12 }}>Combines: {g.fleetNames.join(" + ")}</div>
+              </div>
+            ))}
+          </div>)}
         </div>)}
 
         {/* ══ RESULTS ══ */}
         {page === "results" && (<div>
-          <ST icon="📊">Calculation Results by Period</ST>
-          {!results.length || !results[0].res ? <p style={{ color: P.txD, fontSize: 14 }}>No schedule data — go to Schedule to enter or upload data.</p> : (
-            <div style={{ ...cardStyle, overflowX: "auto" }}>
-              <table style={{ borderCollapse: "collapse", fontFamily: ff, fontSize: 12, width: "100%", minWidth: 800 }}>
-                <thead>
-                  <tr style={{ borderBottom: `1px solid ${P.bd}` }}>
-                    <th style={{ padding: "4px 10px", position: "sticky", left: 0, background: P.card, zIndex: 2 }}></th><th></th>
-                    {results.map(({ inp, trkN, digN }, i) => (<th key={i} style={{ padding: "4px 8px", textAlign: "right", fontSize: 10 }}><div style={{ color: mClr[(inp.truckIdx || 0) % mClr.length], fontWeight: 600 }}>{trkN}</div><div style={{ color: mClr[(inp.diggerIdx || 0) % mClr.length] }}>{digN}</div></th>))}
-                  </tr>
-                  <tr style={{ background: P.secBg, borderBottom: `2px solid ${P.bdS}` }}>
-                    <th style={{ ...thStyle, minWidth: 230, position: "sticky", left: 0, background: P.secBg, zIndex: 2 }}>Variable</th>
-                    <th style={{ ...thStyle, fontSize: 10 }}>Unit</th>
-                    {results.map(({ inp }, i) => <th key={i} style={{ ...thStyle, textAlign: "right", color: P.pri, fontWeight: 700, minWidth: 100 }}>{inp.periodLabel}</th>)}
-                  </tr>
-                </thead>
-                <tbody>
-                  {formulas.reduce((acc, f) => {
-                    if (f.section) acc.push(<tr key={`sec-${f.key}`}><td colSpan={2 + results.length} style={{ padding: "16px 10px 6px", color: P.pri, fontWeight: 700, fontSize: 14, borderBottom: `2px solid ${P.pri}20`, background: P.secBg }}>{f.section}</td></tr>);
-                    acc.push(<tr key={f.key} style={{ background: f.hl ? P.hlBg : "transparent", borderBottom: `1px solid ${P.bd}` }}>
-                      <td style={{ padding: "6px 10px", color: f.hl ? P.hlTx : P.txM, fontSize: 12, fontWeight: f.hl ? 600 : 400, position: "sticky", left: 0, background: f.hl ? P.hlBg : P.card, zIndex: 1 }}>{f.label}</td>
-                      <td style={{ padding: "6px 8px", color: P.txD, fontSize: 10, fontFamily: mf }}>{f.unit}</td>
-                      {results.map(({ res }, pi) => { if (!res) return <td key={pi} style={{ padding: "6px 8px", textAlign: "right", color: P.txD }}>—</td>; const v = res[f.key]; const d = f.cur ? fmtC2(v) : fmt(v, f.dec || 2); return <td key={pi} style={{ padding: "6px 8px", textAlign: "right", color: f.hl ? P.hlTx : P.tx, fontWeight: f.hl ? 700 : 400, fontSize: 12, fontFamily: mf }}>{d}</td>; })}
-                    </tr>); return acc;
-                  }, [])}
-                </tbody>
-              </table>
+          <ST icon="📊">Calculation Results</ST>
+          {equipGroups.length === 0 ? <p style={{ color: P.txD }}>No data.</p> : equipGroups.map(grp => (
+            <div key={grp.key} style={{ marginBottom: 32 }}>
+              <div style={{ padding: "10px 16px", background: P.priBg, borderRadius: "8px 8px 0 0", border: `1px solid ${P.pri}22`, borderBottom: "none" }}>
+                <span style={{ color: P.pri, fontWeight: 700, fontSize: 14 }}>{grp.truckName} + {grp.diggerName}</span>
+                <span style={{ color: P.txD, fontSize: 12, marginLeft: 12 }}>({grp.fleetNames.join(" + ")})</span>
+              </div>
+              <div style={{ ...cardS, borderTopLeftRadius: 0, borderTopRightRadius: 0, overflowX: "auto" }}>
+                <table style={{ borderCollapse: "collapse", fontFamily: ff, fontSize: 12, width: "100%", minWidth: 600 }}>
+                  <thead><tr style={{ background: P.secBg, borderBottom: `2px solid ${P.bdS}` }}>
+                    <th style={{ ...thS, minWidth: 230, position: "sticky", left: 0, background: P.secBg, zIndex: 2 }}>Variable</th>
+                    <th style={{ ...thS, fontSize: 10 }}>Unit</th>
+                    {grp.results.map((r, i) => <th key={i} style={{ ...thS, textAlign: "right", color: P.pri, fontWeight: 700, minWidth: 100 }}>{r.periodLabel}<div style={{ fontSize: 9, color: P.txD, fontWeight: 400 }}>{r.fleetName}</div></th>)}
+                  </tr></thead>
+                  <tbody>
+                    {formulas.reduce((acc, f) => {
+                      if (f.section) acc.push(<tr key={`sec-${f.key}`}><td colSpan={2 + grp.results.length} style={{ padding: "14px 10px 6px", color: P.pri, fontWeight: 700, fontSize: 13, borderBottom: `2px solid ${P.pri}20`, background: P.secBg }}>{f.section}</td></tr>);
+                      acc.push(<tr key={f.key} style={{ background: f.hl ? P.hlBg : "transparent", borderBottom: `1px solid ${P.bd}` }}>
+                        <td style={{ padding: "5px 10px", color: f.hl ? P.hlTx : P.txM, fontSize: 12, fontWeight: f.hl ? 600 : 400, position: "sticky", left: 0, background: f.hl ? P.hlBg : P.card, zIndex: 1 }}>{f.label}</td>
+                        <td style={{ padding: "5px 6px", color: P.txD, fontSize: 10, fontFamily: mf }}>{f.unit}</td>
+                        {grp.results.map((r, pi) => { const v = r.res?.[f.key]; const d = f.cur ? fmtC2(v) : fmt(v, f.dec || 2); return <td key={pi} style={{ padding: "5px 8px", textAlign: "right", color: f.hl ? P.hlTx : P.tx, fontWeight: f.hl ? 700 : 400, fontSize: 12, fontFamily: mf }}>{d}</td>; })}
+                      </tr>); return acc;
+                    }, [])}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          )}
+          ))}
         </div>)}
 
         {/* ══ FORMULA EDITOR ══ */}
@@ -553,43 +696,38 @@ export default function App() {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
             <ST icon="🧮">Formula Editor</ST>
             <div style={{ display: "flex", gap: 8 }}>
-              <input type="text" placeholder="Search formulas..." value={formulaSearch} onChange={e => setFormulaSearch(e.target.value)} style={{ ...selStyle, width: 200 }} />
-              <Btn onClick={addFormula} color={P.gn} solid>+ Add Formula</Btn>
-              <Btn onClick={() => { setFormulas(defaultFormulas()); setEditingFormula(null); }} color={P.rd} small>Reset All</Btn>
+              <input type="text" placeholder="Search..." value={formulaSearch} onChange={e => setFormulaSearch(e.target.value)} style={{ ...selS, width: 180 }} />
+              <Btn onClick={addFormula} color={P.gn} solid>+ Add</Btn>
+              <Btn onClick={() => { setFormulas(defaultFormulas()); setEditingFormula(null); }} color={P.rd} small>Reset</Btn>
             </div>
           </div>
-          <div style={{ ...cardStyle, padding: "12px 16px", marginBottom: 12, display: "flex", gap: 20, alignItems: "center", flexWrap: "wrap", background: P.gnBg, borderColor: `${P.gn}33` }}>
-            <span style={{ color: P.gn, fontWeight: 700, fontSize: 12 }}>🧪 Test With:</span>
-            {[["Period", testPeriodIdx, setTestPeriodIdx, src.map((p, i) => ({ v: i, l: `${p.periodLabel} (${fmtInt(p.totalMined * unitMul)}t)` }))], ["Truck", testTruckIdx, setTestTruckIdx, trucks.map((t, i) => ({ v: i, l: t.truckName }))], ["Digger", testDiggerIdx, setTestDiggerIdx, diggers.map((d, i) => ({ v: i, l: d.diggerName }))]].map(([lbl, val, set, opts]) => (
-              <div key={lbl} style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ color: P.txM, fontSize: 11, fontWeight: 600 }}>{lbl}:</span><select value={val} onChange={e => set(parseInt(e.target.value))} style={{ ...selStyle, fontSize: 11 }}>{opts.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}</select></div>
-            ))}
+          <div style={{ ...cardS, padding: "12px 16px", marginBottom: 12, display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", background: P.gnBg, borderColor: `${P.gn}33` }}>
+            <span style={{ color: P.gn, fontWeight: 700, fontSize: 12 }}>🧪 Test:</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ color: P.txM, fontSize: 11, fontWeight: 600 }}>Period:</span><select value={testPeriodIdx} onChange={e => setTestPeriodIdx(parseInt(e.target.value))} style={{ ...selS, fontSize: 11 }}>{Array.from({ length: numPeriods }, (_, i) => <option key={i} value={i}>P{i + 1}</option>)}</select></div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ color: P.txM, fontSize: 11, fontWeight: 600 }}>Fleet:</span><select value={testFleetIdx} onChange={e => setTestFleetIdx(parseInt(e.target.value))} style={{ ...selS, fontSize: 11 }}>{fleets.map((f, i) => <option key={i} value={i}>{f.name}</option>)}</select></div>
           </div>
-          <div style={{ padding: "10px 14px", background: P.blBg, borderRadius: 8, border: `1px solid ${P.bl}18`, marginBottom: 12, fontSize: 11, color: P.txM }}>
-            <b style={{ color: P.bl }}>Variables:</b> <code style={{ color: P.pri, fontFamily: mf, fontSize: 10 }}>totalMined, oreMined, avgNetPower, calendarDays, periodMultiplier, T_payload, T_availability, D_effectiveDigRate, O_diggerFleetRoundingThreshold, ...</code>
-            &nbsp;| <b style={{ color: P.bl }}>Functions:</b> <code style={{ color: P.gn, fontFamily: mf, fontSize: 10 }}>IF(cond,a,b) CEIL() FLOOR() MAX() MIN()</code>
-          </div>
-          <div style={{ ...cardStyle, overflowX: "auto" }}>
+          <div style={{ ...cardS, overflowX: "auto" }}>
             <table style={{ borderCollapse: "collapse", fontFamily: ff, fontSize: 12, width: "100%" }}>
               <thead><tr style={{ background: P.secBg, borderBottom: `2px solid ${P.bdS}` }}>
-                {[["#", 30], ["Key", 115], ["Label", 190], ["Unit", 45], ["Formula", null], ["🧪 Test", 120], ["", 55]].map(([h, w], i) => (<th key={i} style={{ ...thStyle, width: w || "auto", textAlign: i === 5 ? "right" : "left", color: i === 5 ? P.gn : P.txM }}>{h}</th>))}
+                {[["#", 30], ["Key", 110], ["Label", 190], ["Unit", 42], ["Formula", null], ["🧪 Test", 115], ["", 55]].map(([h, w], i) => (<th key={i} style={{ ...thS, width: w || "auto", textAlign: i === 5 ? "right" : "left", color: i === 5 ? P.gn : P.txM }}>{h}</th>))}
               </tr></thead>
               <tbody>
-                {(() => { let lSec = null, lGrp = null, rn = 0;
-                  return formulas.filter(f => { if (!formulaSearch) return true; const s = formulaSearch.toLowerCase(); return f.key.toLowerCase().includes(s) || f.label.toLowerCase().includes(s) || f.formula.toLowerCase().includes(s) || (f.section || "").toLowerCase().includes(s) || (f.group || "").toLowerCase().includes(s); }).flatMap((f, i) => {
+                {(() => { let lS = null, lG = null, rn = 0;
+                  return formulas.filter(f => { if (!formulaSearch) return true; const s = formulaSearch.toLowerCase(); return [f.key, f.label, f.formula, f.section || "", f.group || ""].some(x => x.toLowerCase().includes(s)); }).flatMap((f, i) => {
                     const rows = [];
-                    if (f.section && f.section !== lSec) { lSec = f.section; lGrp = null; rows.push(<tr key={`s${i}`}><td colSpan={7} style={{ padding: "18px 10px 6px", color: P.pri, fontWeight: 700, fontSize: 14, borderBottom: `2px solid ${P.pri}`, background: P.secBg }}>{f.section}</td></tr>); }
-                    if (f.group && f.group !== lGrp) { lGrp = f.group; rows.push(<tr key={`g${i}`}><td colSpan={7} style={{ padding: "9px 10px 4px 22px", color: P.txD, fontWeight: 600, fontSize: 11, borderBottom: `1px solid ${P.bd}`, background: "#f8fafc" }}>▸ {f.group}</td></tr>); }
+                    if (f.section && f.section !== lS) { lS = f.section; lG = null; rows.push(<tr key={`s${i}`}><td colSpan={7} style={{ padding: "16px 10px 6px", color: P.pri, fontWeight: 700, fontSize: 14, borderBottom: `2px solid ${P.pri}`, background: P.secBg }}>{f.section}</td></tr>); }
+                    if (f.group && f.group !== lG) { lG = f.group; rows.push(<tr key={`g${i}`}><td colSpan={7} style={{ padding: "8px 10px 4px 22px", color: P.txD, fontWeight: 600, fontSize: 11, borderBottom: `1px solid ${P.bd}`, background: "#f8fafc" }}>▸ {f.group}</td></tr>); }
                     rn++; const isE = editingFormula === f.key; const tv = testResult ? testResult[f.key] : ""; const td = f.cur ? fmtC2(tv) : fmt(tv, f.dec || 2);
                     rows.push(<tr key={f.key} style={{ borderBottom: `1px solid ${P.bd}`, background: isE ? P.blBg : f.hl ? P.hlBg : "transparent" }}>
-                      <td style={{ padding: "5px 10px", color: P.txD, fontSize: 10, fontFamily: mf }}>{rn}</td>
-                      <td style={{ padding: "5px 10px" }}>{isE ? <input type="text" value={f.key} onChange={e => setFormulas(pr => pr.map(ff => ff.key === f.key ? { ...ff, key: e.target.value } : ff))} style={{ width: 105, ...inpStyle(true) }} /> : <code style={{ color: P.pri, fontSize: 11, fontFamily: mf, fontWeight: 600 }}>{f.key}</code>}</td>
-                      <td style={{ padding: "5px 10px" }}>{isE ? <input type="text" value={f.label} onChange={e => setFormulas(pr => pr.map(ff => ff.key === f.key ? { ...ff, label: e.target.value } : ff))} style={{ width: 180, padding: "4px 8px", background: P.input, border: `1px solid ${P.bl}`, borderRadius: 5, color: P.tx, fontFamily: ff, fontSize: 12 }} /> : <span style={{ color: f.hl ? P.hlTx : P.txM, fontWeight: f.hl ? 600 : 400 }}>{f.label}</span>}</td>
-                      <td style={{ padding: "5px 8px" }}>{isE ? <input type="text" value={f.unit} onChange={e => setFormulas(pr => pr.map(ff => ff.key === f.key ? { ...ff, unit: e.target.value } : ff))} style={{ width: 42, ...inpStyle(false) }} /> : <span style={{ color: P.txD, fontSize: 11 }}>{f.unit}</span>}</td>
-                      <td style={{ padding: "5px 10px" }}>{isE ? (<div style={{ display: "flex", gap: 6 }}><input type="text" value={editText} onChange={e => setEditText(e.target.value)} onKeyDown={e => { if (e.key === "Enter") updateFormula(f.key, editText); if (e.key === "Escape") setEditingFormula(null); }} style={{ flex: 1, padding: "5px 10px", background: P.input, border: `1.5px solid ${P.bl}`, borderRadius: 6, color: P.tx, fontFamily: mf, fontSize: 12 }} autoFocus /><Btn onClick={() => updateFormula(f.key, editText)} color={P.gn} small solid>✓</Btn><Btn onClick={() => setEditingFormula(null)} color={P.txD} small>✕</Btn></div>) : (<code onClick={() => { setEditingFormula(f.key); setEditText(f.formula); }} style={{ color: "#475569", fontSize: 11, fontFamily: mf, cursor: "pointer", display: "block", padding: "4px 10px", borderRadius: 5, background: P.input, border: `1px solid transparent` }}>{f.formula}</code>)}</td>
-                      <td style={{ padding: "5px 10px", textAlign: "right", fontWeight: f.hl ? 700 : 500, color: tv === "" ? P.txD : f.hl ? P.gn : P.tx, fontSize: 12, fontFamily: mf, background: P.gnBg + "55" }}>{td}</td>
-                      <td style={{ padding: "5px 8px", textAlign: "center" }}>{!isE && (<div style={{ display: "flex", gap: 3, justifyContent: "center" }}>
+                      <td style={{ padding: "5px 8px", color: P.txD, fontSize: 10, fontFamily: mf }}>{rn}</td>
+                      <td style={{ padding: "5px 8px" }}>{isE ? <input type="text" value={f.key} onChange={e => setFormulas(pr => pr.map(ff => ff.key === f.key ? { ...ff, key: e.target.value } : ff))} style={{ width: 100, padding: "3px 6px", background: P.input, border: `1px solid ${P.bl}`, borderRadius: 4, color: P.pri, fontFamily: mf, fontSize: 11 }} /> : <code style={{ color: P.pri, fontSize: 11, fontFamily: mf, fontWeight: 600 }}>{f.key}</code>}</td>
+                      <td style={{ padding: "5px 8px" }}>{isE ? <input type="text" value={f.label} onChange={e => setFormulas(pr => pr.map(ff => ff.key === f.key ? { ...ff, label: e.target.value } : ff))} style={{ width: 180, padding: "3px 6px", background: P.input, border: `1px solid ${P.bl}`, borderRadius: 4, color: P.tx, fontFamily: ff, fontSize: 12 }} /> : <span style={{ color: f.hl ? P.hlTx : P.txM, fontWeight: f.hl ? 600 : 400 }}>{f.label}</span>}</td>
+                      <td style={{ padding: "5px 6px", color: P.txD, fontSize: 11 }}>{f.unit}</td>
+                      <td style={{ padding: "5px 8px" }}>{isE ? (<div style={{ display: "flex", gap: 6 }}><input type="text" value={editText} onChange={e => setEditText(e.target.value)} onKeyDown={e => { if (e.key === "Enter") updateFormula(f.key, editText); if (e.key === "Escape") setEditingFormula(null); }} style={{ flex: 1, padding: "5px 10px", background: P.input, border: `1.5px solid ${P.bl}`, borderRadius: 6, color: P.tx, fontFamily: mf, fontSize: 12 }} autoFocus /><Btn onClick={() => updateFormula(f.key, editText)} color={P.gn} small solid>✓</Btn><Btn onClick={() => setEditingFormula(null)} color={P.txD} small>✕</Btn></div>) : (<code onClick={() => { setEditingFormula(f.key); setEditText(f.formula); }} style={{ color: "#475569", fontSize: 11, fontFamily: mf, cursor: "pointer", display: "block", padding: "4px 10px", borderRadius: 5, background: P.input }}>{f.formula}</code>)}</td>
+                      <td style={{ padding: "5px 8px", textAlign: "right", fontWeight: f.hl ? 700 : 500, color: tv === "" ? P.txD : f.hl ? P.gn : P.tx, fontSize: 12, fontFamily: mf, background: P.gnBg + "55" }}>{td}</td>
+                      <td style={{ padding: "5px 6px", textAlign: "center" }}>{!isE && (<div style={{ display: "flex", gap: 3, justifyContent: "center" }}>
                         <button onClick={() => { setEditingFormula(f.key); setEditText(f.formula); }} style={{ background: P.blBg, border: `1px solid ${P.bl}22`, borderRadius: 5, color: P.bl, cursor: "pointer", fontSize: 11, padding: "3px 7px" }}>✏️</button>
-                        <button onClick={() => removeFormula(f.key)} style={{ background: P.rdBg, border: `1px solid ${P.rd}22`, borderRadius: 5, color: P.rd, cursor: "pointer", fontSize: 11, padding: "3px 7px" }}>🗑️</button>
+                        <button onClick={() => setFormulas(pr => pr.filter(ff => ff.key !== f.key))} style={{ background: P.rdBg, border: `1px solid ${P.rd}22`, borderRadius: 5, color: P.rd, cursor: "pointer", fontSize: 11, padding: "3px 7px" }}>🗑️</button>
                       </div>)}</td>
                     </tr>); return rows;
                   });
@@ -603,44 +741,40 @@ export default function App() {
         {page === "truck" && (<div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
             <ST icon="🚛">Truck Model Comparison</ST>
-            <div style={{ display: "flex", gap: 8 }}><Btn onClick={() => setTrucks(p => [...p, mkTruck({ truckName: `Truck ${p.length + 1}` })])} solid>+ New Truck</Btn><Btn onClick={() => setTrucks(p => [...p, mkTruckL()])} color={P.bl}>+ Liebherr</Btn><Btn onClick={() => setTrucks(p => [...p, mkTruck()])} color={P.gn}>+ XCMG</Btn></div>
+            <div style={{ display: "flex", gap: 8 }}><Btn onClick={() => setTrucks(p => [...p, mkTruck({ truckName: `Truck ${p.length + 1}` })])} solid>+ New</Btn><Btn onClick={() => setTrucks(p => [...p, mkTruckL()])} color={P.bl}>+ Liebherr</Btn><Btn onClick={() => setTrucks(p => [...p, mkTruck()])} color={P.gn}>+ XCMG</Btn></div>
           </div>
-          <div style={{ ...cardStyle, overflowX: "auto" }}>
-            <table style={{ borderCollapse: "collapse", fontFamily: ff, fontSize: 12, width: "100%" }}>
-              <thead><tr style={{ background: P.secBg, borderBottom: `2px solid ${P.bdS}` }}>
-                <th style={{ ...thStyle, minWidth: 190, position: "sticky", left: 0, background: P.secBg, zIndex: 2 }}>Parameter</th>
-                <th style={{ ...thStyle, minWidth: 45, fontSize: 10 }}>Unit</th>
-                {trucks.map((t, i) => (<th key={t.id} style={{ ...thStyle, minWidth: 145 }}><div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}><span style={{ color: mClr[i % mClr.length], fontWeight: 700, fontSize: 13 }}>Model {i + 1}</span>{trucks.length > 1 && <button onClick={() => setTrucks(p => p.filter((_, j) => j !== i))} style={{ background: P.rdBg, border: `1px solid ${P.rd}22`, borderRadius: 5, color: P.rd, cursor: "pointer", fontSize: 12, padding: "2px 7px" }}>×</button>}</div></th>))}
-              </tr></thead>
-              <tbody>{truckRows.map((r, i) => <CompRow key={i} label={r.label} field={r.field} models={trucks} onChange={updT} unit={r.unit} type={r.type} step={r.step} section={r.section} />)}</tbody>
-            </table>
-          </div>
+          <div style={{ ...cardS, overflowX: "auto" }}><table style={{ borderCollapse: "collapse", fontFamily: ff, fontSize: 12, width: "100%" }}>
+            <thead><tr style={{ background: P.secBg, borderBottom: `2px solid ${P.bdS}` }}>
+              <th style={{ ...thS, minWidth: 190, position: "sticky", left: 0, background: P.secBg, zIndex: 2 }}>Parameter</th>
+              <th style={{ ...thS, minWidth: 45, fontSize: 10 }}>Unit</th>
+              {trucks.map((t, i) => (<th key={t.id} style={{ ...thS, minWidth: 145 }}><div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}><span style={{ color: mClr[i % mClr.length], fontWeight: 700, fontSize: 13 }}>Model {i + 1}</span>{trucks.length > 1 && <button onClick={() => setTrucks(p => p.filter((_, j) => j !== i))} style={{ background: P.rdBg, border: `1px solid ${P.rd}22`, borderRadius: 5, color: P.rd, cursor: "pointer", padding: "2px 7px" }}>×</button>}</div></th>))}
+            </tr></thead>
+            <tbody>{truckRows.map((r, i) => <CompRow key={i} {...r} models={trucks} onChange={updT} />)}</tbody>
+          </table></div>
         </div>)}
 
         {/* ══ DIGGERS ══ */}
         {page === "digger" && (<div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
             <ST icon="⛏️">Digger Model Comparison</ST>
-            <div style={{ display: "flex", gap: 8 }}><Btn onClick={() => setDiggers(p => [...p, mkDigger({ diggerName: `Digger ${p.length + 1}` })])} solid>+ New Digger</Btn><Btn onClick={() => setDiggers(p => [...p, mkDigger()])} color={P.bl}>+ 300t</Btn><Btn onClick={() => setDiggers(p => [...p, mkDigger4()])} color={P.gn}>+ 400t</Btn></div>
+            <div style={{ display: "flex", gap: 8 }}><Btn onClick={() => setDiggers(p => [...p, mkDigger({ diggerName: `Digger ${p.length + 1}` })])} solid>+ New</Btn><Btn onClick={() => setDiggers(p => [...p, mkDigger()])} color={P.bl}>+ 300t</Btn><Btn onClick={() => setDiggers(p => [...p, mkDigger4()])} color={P.gn}>+ 400t</Btn></div>
           </div>
-          <div style={{ ...cardStyle, overflowX: "auto" }}>
-            <table style={{ borderCollapse: "collapse", fontFamily: ff, fontSize: 12, width: "100%" }}>
-              <thead><tr style={{ background: P.secBg, borderBottom: `2px solid ${P.bdS}` }}>
-                <th style={{ ...thStyle, minWidth: 190, position: "sticky", left: 0, background: P.secBg, zIndex: 2 }}>Parameter</th>
-                <th style={{ ...thStyle, minWidth: 45, fontSize: 10 }}>Unit</th>
-                {diggers.map((d, i) => (<th key={d.id} style={{ ...thStyle, minWidth: 145 }}><div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}><span style={{ color: mClr[i % mClr.length], fontWeight: 700, fontSize: 13 }}>Model {i + 1}</span>{diggers.length > 1 && <button onClick={() => setDiggers(p => p.filter((_, j) => j !== i))} style={{ background: P.rdBg, border: `1px solid ${P.rd}22`, borderRadius: 5, color: P.rd, cursor: "pointer", fontSize: 12, padding: "2px 7px" }}>×</button>}</div></th>))}
-              </tr></thead>
-              <tbody>{diggerRows.map((r, i) => <CompRow key={i} label={r.label} field={r.field} models={diggers} onChange={updD} unit={r.unit} type={r.type} step={r.step} section={r.section} />)}</tbody>
-            </table>
-          </div>
+          <div style={{ ...cardS, overflowX: "auto" }}><table style={{ borderCollapse: "collapse", fontFamily: ff, fontSize: 12, width: "100%" }}>
+            <thead><tr style={{ background: P.secBg, borderBottom: `2px solid ${P.bdS}` }}>
+              <th style={{ ...thS, minWidth: 190, position: "sticky", left: 0, background: P.secBg, zIndex: 2 }}>Parameter</th>
+              <th style={{ ...thS, minWidth: 45, fontSize: 10 }}>Unit</th>
+              {diggers.map((d, i) => (<th key={d.id} style={{ ...thS, minWidth: 145 }}><div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}><span style={{ color: mClr[i % mClr.length], fontWeight: 700, fontSize: 13 }}>Model {i + 1}</span>{diggers.length > 1 && <button onClick={() => setDiggers(p => p.filter((_, j) => j !== i))} style={{ background: P.rdBg, border: `1px solid ${P.rd}22`, borderRadius: 5, color: P.rd, cursor: "pointer", padding: "2px 7px" }}>×</button>}</div></th>))}
+            </tr></thead>
+            <tbody>{diggerRows.map((r, i) => <CompRow key={i} {...r} models={diggers} onChange={updD} />)}</tbody>
+          </table></div>
         </div>)}
 
         {/* ══ SETTINGS ══ */}
         {page === "other" && (<div style={{ maxWidth: 620 }}>
           <ST icon="⚙️">General Assumptions</ST>
-          <div style={{ ...cardStyle, padding: 24 }}>
-            {[["moistureContent", "Moisture Content", "%", 0.001], ["exchangeRate", "Exchange Rate (AUD:USD)", "ratio", 0.01], ["discountRate", "Discount Rate", "%", 0.005], ["electricityCost", "Electricity Cost", "$/kWh", 0.001], ["dieselCost", "Diesel Cost", "$/L", 0.01], ["allInFitterPerYear", "All-in Fitter Rate", "$/hr"], ["mannedOperator", "Manned Operator Rate", "$/SMU"], ["calendarTime", "Calendar Time", "hrs/yr"], ["diggerFleetRoundingThreshold", "Digger Fleet Rounding Threshold", "frac", 0.05]].map(([k, l, u, s]) => (
-              <div key={k} style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10, padding: "4px 0" }}>
+          <div style={{ ...cardS, padding: 24 }}>
+            {[["moistureContent", "Moisture Content", "%", 0.001], ["exchangeRate", "Exchange Rate (AUD:USD)", "ratio", 0.01], ["discountRate", "Discount Rate", "%", 0.005], ["electricityCost", "Electricity Cost", "$/kWh", 0.001], ["dieselCost", "Diesel Cost", "$/L", 0.01], ["allInFitterPerYear", "All-in Fitter Rate", "$/hr"], ["mannedOperator", "Manned Operator Rate", "$/SMU"], ["calendarTime", "Calendar Time", "hrs/yr"], ["diggerFleetRoundingThreshold", "Digger Fleet Rounding", "frac", 0.05]].map(([k, l, u, s]) => (
+              <div key={k} style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
                 <div style={{ flex: 1, color: P.txM, fontSize: 14, fontWeight: 500 }}>{l}</div>
                 <input type="number" value={otherA[k]} onChange={e => uO(k, parseFloat(e.target.value) || 0)} step={s || 0.01} style={{ width: 145, padding: "7px 12px", background: P.input, border: `1px solid ${P.bd}`, borderRadius: 7, color: P.tx, fontFamily: mf, fontSize: 14, textAlign: "right" }} />
                 <span style={{ color: P.txD, fontSize: 12, fontWeight: 500, minWidth: 55 }}>{u}</span>
