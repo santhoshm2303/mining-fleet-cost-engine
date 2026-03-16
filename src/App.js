@@ -1,5 +1,6 @@
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import * as XLSX from "xlsx";
 
 /* ═══════════════════════════════════════════════════════════════════════
    MINING FLEET COST ENGINE v4
@@ -205,22 +206,43 @@ const CompRow=({label,field,models,onChange,unit,type="number",step,section})=>{
 const truckRows=[{section:true,label:"Identity & TUM"},{field:"truckName",label:"Truck Name",type:"text"},{field:"payload",label:"Payload",unit:"t"},{field:"powerSource",label:"Power Source",type:"text"},{field:"availability",label:"Availability",unit:"%",step:0.01},{field:"useOfAvailability",label:"Use of Availability",unit:"%",step:0.01},{field:"operatingEfficiency",label:"Operating Efficiency",unit:"%",step:0.01},{field:"utToSmuConversion",label:"UT → SMU",unit:"#"},{field:"performanceEfficiency",label:"Perf Efficiency",unit:"%",step:0.01},{section:true,label:"Spot / Queue / Dump Times"},{field:"spotTimeLoad",label:"Spot Time at Load",unit:"min"},{field:"queueTimeLoad",label:"Queue Time at Load",unit:"min"},{field:"spotTimeDump",label:"Spot Time at Dump",unit:"min"},{field:"queueTimeDump",label:"Queue Time at Dump",unit:"min"},{field:"dumpTime",label:"Dump Time",unit:"min"},{section:true,label:"Capital Expenditure"},{field:"totalTruckCapex",label:"Total Capex",unit:"AUD",step:1000},{field:"capexPerSmuHour",label:"Capex/SMU Hr",unit:"$/SMU"},{field:"powerSystemCost",label:"Power System",unit:"AUD",step:1000},{section:true,label:"Operating Expenditure"},{field:"opexPerSmuHour",label:"Opex/SMU Hr",unit:"$/hr"},{field:"operatorRate",label:"Operator Rate",unit:"$/SMU"},{section:true,label:"Charging"},{field:"nominalBatteryCapacityNew",label:"Nom Battery Cap",unit:"kWh"},{field:"averageBatteryUsableCapacity",label:"Avg Usable Cap",unit:"kWh"},{field:"travelToRechargeEnergy",label:"Travel Rchg Energy",unit:"kWh"},{field:"travelToSwapChargerStationTime",label:"Travel to Charger",unit:"min"},{field:"chargerQueueTime",label:"Queue Time",unit:"min"},{field:"chargerConnectionPositioningTime",label:"Connection Time",unit:"min"},{field:"equivalentFullLifeCycles",label:"Equiv Life Cycles",unit:"#"},{field:"chargingTime",label:"Charging Time",unit:"min"},{field:"rechargeRateC",label:"Recharge Rate",unit:"C"},{section:true,label:"Charger Infrastructure"},{field:"chargerOperatingTime",label:"Charger Op Time",unit:"hrs"},{field:"demandResponseAllowance",label:"Demand Resp %",unit:"%",step:0.01},{field:"numBatteriesPerStation",label:"Batteries/Station",unit:"#"},{field:"totalChargerCapex",label:"Charger Capex",unit:"AUD",step:1000},{field:"avgChargerEffectiveHours",label:"Avg Charger Eff Hrs",unit:"hrs"},{field:"totalChargerOandO",label:"Charger O&O",unit:"$/SMU"}];
 const diggerRows=[{section:true,label:"Identity & TUM"},{field:"diggerName",label:"Digger Name",type:"text"},{field:"powerSource",label:"Power Source",type:"text"},{field:"effectiveDigRate",label:"Eff Dig Rate",unit:"t/hr",step:100},{field:"availability",label:"Availability",unit:"%",step:0.01},{field:"useOfAvailability",label:"Use of Availability",unit:"%",step:0.01},{field:"operatingEfficiency",label:"Op Efficiency",unit:"%",step:0.01},{field:"utToSmuConversion",label:"UT → SMU",unit:"#"},{field:"equipmentLife",label:"Equip Life",unit:"hrs"},{field:"effectiveTime",label:"Eff Time",unit:"hrs"},{section:true,label:"Capital Expenditure"},{field:"totalCapex",label:"Total Capex",unit:"AUD",step:10000},{field:"capexPerSmuHour",label:"Capex/SMU",unit:"$/SMU"},{section:true,label:"Operating Expenditure (per SMU)"},{field:"dieselElectricityCost",label:"Diesel/Elec",unit:"$/SMU"},{field:"maintenanceLabour",label:"Maint Labour",unit:"$/SMU"},{field:"oilAndCoolant",label:"Oil & Coolant",unit:"$/SMU"},{field:"partsComponentsPM05",label:"Parts PM05",unit:"$/SMU"},{field:"materialsConsumables",label:"Materials",unit:"$/SMU"},{field:"get",label:"GET",unit:"$/SMU"},{field:"cableCost",label:"Cable Cost",unit:"$/SMU"},{field:"tracks",label:"Tracks",unit:"$/SMU"},{field:"tires",label:"Tires",unit:"$/SMU"},{field:"fmsLicenseFee",label:"FMS License",unit:"$/SMU"},{field:"batteryReplacement",label:"Battery Repl",unit:"$/SMU"},{field:"operatorCost",label:"Operator",unit:"$/SMU"},{field:"rehandleCostPerTonne",label:"Rehandle $/t",unit:"$/t"}];
 
+// ─── LOCAL STORAGE ─────────────────────────────────────────────────────
+var SAVE_KEY="mfce_state_v4";
+function saveToLS(data){try{localStorage.setItem(SAVE_KEY,JSON.stringify(data))}catch(e){}}
+function loadFromLS(){try{var d=localStorage.getItem(SAVE_KEY);return d?JSON.parse(d):null}catch(e){return null}}
+
+// ─── EXPORT HELPERS ────────────────────────────────────────────────────
+function exportToCSV(headers,rows,filename){
+  var csv=headers.join(",")+"\n";
+  for(var i=0;i<rows.length;i++){csv+=rows[i].map(function(c){var s=String(c==null?"":c);return s.indexOf(",")>=0||s.indexOf('"')>=0?'"'+s.replace(/"/g,'""')+'"':s}).join(",")+"\n"}
+  var blob=new Blob([csv],{type:"text/csv"});var url=URL.createObjectURL(blob);var a=document.createElement("a");a.href=url;a.download=filename;a.click();URL.revokeObjectURL(url);
+}
+function exportToXLSX(sheetsData,filename){
+  var wb=XLSX.utils.book_new();
+  for(var i=0;i<sheetsData.length;i++){
+    var sd=sheetsData[i];var ws=XLSX.utils.aoa_to_sheet([sd.headers].concat(sd.rows));
+    XLSX.utils.book_append_sheet(wb,ws,sd.name.substring(0,31));
+  }
+  XLSX.writeFile(wb,filename);
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 export default function App(){
-  // ─── GLOBAL STATE ──────────────────────────────────────────────────
+  // ─── GLOBAL STATE (with localStorage restore) ──────────────────────
+  var saved=useMemo(function(){return loadFromLS()},[]);
   const [page,setPage]=useState("scenarios");
-  const [trucks,setTrucks]=useState([mkTruck(),mkTruckL()]);
-  const [diggers,setDiggers]=useState([mkDigger(),mkDigger4()]);
-  const [otherA,setOtherA]=useState(defaultOther);
-  const [formulas,setFormulas]=useState(defaultFormulas);
-  const [fleets,setFleets]=useState([mkFleet("Fleet 1",0,0,0),mkFleet("Fleet 2",1,1,0)]);
-  const [scenarios,setScenarios]=useState([mkScenario("Scenario ST"),mkScenario("Scenario LT")]);
+  const [trucks,setTrucks]=useState(function(){return saved&&saved.trucks?saved.trucks:[mkTruck(),mkTruckL()]});
+  const [diggers,setDiggers]=useState(function(){return saved&&saved.diggers?saved.diggers:[mkDigger(),mkDigger4()]});
+  const [otherA,setOtherA]=useState(function(){return saved&&saved.otherA?saved.otherA:defaultOther()});
+  const [formulas,setFormulas]=useState(function(){return saved&&saved.formulas?saved.formulas:defaultFormulas()});
+  const [fleets,setFleets]=useState(function(){return saved&&saved.fleets?saved.fleets:[mkFleet("Fleet 1",0,0),mkFleet("Fleet 2",1,1)]});
+  const [scenarios,setScenarios]=useState(function(){return saved&&saved.scenarios?saved.scenarios:[mkScenario("Scenario ST"),mkScenario("Scenario LT")]});
   const [activeScnIdx,setActiveScnIdx]=useState(0);
   const [formulaSearch,setFormulaSearch]=useState("");
   const [editingFormula,setEditingFormula]=useState(null);
   const [editText,setEditText]=useState("");
-  const [collSec,setCollSec]=useState({});  // collapsed sections: key=sectionName, val=true
-  const [collGrp,setCollGrp]=useState({});  // collapsed groups: key=groupName, val=true
+  const [collSec,setCollSec]=useState({});
+  const [collGrp,setCollGrp]=useState({});
   const togSec=(s)=>setCollSec(p=>{const n=Object.assign({},p);n[s]=!n[s];return n});
   const togGrp=(g)=>setCollGrp(p=>{const n=Object.assign({},p);n[g]=!n[g];return n});
   const [testPeriodIdx,setTestPeriodIdx]=useState(0);
@@ -229,6 +251,58 @@ export default function App(){
   const togSeries=(k)=>setHiddenSeries(function(p){var n=Object.assign({},p);n[k]=!n[k];return n});
   const isVis=(k)=>!hiddenSeries[k];
   const fileRef=useRef();
+  const [lastSaved,setLastSaved]=useState("");
+
+  // ─── AUTO-SAVE to localStorage ─────────────────────────────────────
+  useEffect(function(){
+    var timer=setTimeout(function(){
+      // Don't save csvData (too large, not serializable well) — save only manualData and csvRawLabels
+      var scenariosToSave=scenarios.map(function(s){return Object.assign({},s,{csvData:null})});
+      saveToLS({trucks:trucks,diggers:diggers,otherA:otherA,formulas:formulas,fleets:fleets,scenarios:scenariosToSave});
+      setLastSaved(new Date().toLocaleTimeString());
+    },1000);
+    return function(){clearTimeout(timer)};
+  },[trucks,diggers,otherA,formulas,fleets,scenarios]);
+
+  // ─── EXPORT FUNCTIONS ──────────────────────────────────────────────
+  const exportResultsCSV=useCallback(function(){
+    if(!results.length)return;
+    var headers=["Variable","Unit"].concat(results.map(function(r){return r.periodLabel+" ("+r.fleetName+")"}));
+    var rows=formulas.map(function(f){
+      var row=[f.label,f.unit||""];
+      results.forEach(function(r){var v=r.res?r.res[f.key]:"";row.push(v===""||v==null?"":v)});
+      return row;
+    });
+    exportToCSV(headers,rows,"results_"+scn.name.replace(/[^a-zA-Z0-9]/g,"_")+".csv");
+  },[results,formulas,scn]);
+
+  const exportResultsXLSX=useCallback(function(){
+    if(!results.length)return;
+    var sheets=[];
+    // Results sheet
+    var rHeaders=["Variable","Unit"].concat(results.map(function(r){return r.periodLabel+" ("+r.fleetName+")"}));
+    var rRows=formulas.map(function(f){
+      var row=[f.label,f.unit||""];
+      results.forEach(function(r){var v=r.res?r.res[f.key]:"";row.push(typeof v==="number"?v:"")});
+      return row;
+    });
+    sheets.push({name:"Results - "+scn.name.substring(0,20),headers:rHeaders,rows:rRows});
+    // Schedule sheet
+    if(scn.csvData){
+      var sHeaders=["Row Label"].concat(Array.from({length:scn.csvData.np},function(_,i){return scn.csvData.gs("Period",i)||("P"+(i+1))}));
+      var sRows=scn.csvRawLabels.map(function(label){
+        var row=[label];for(var i=0;i<scn.csvData.np;i++){var v=scn.csvData.gv(label,i);var s=scn.csvData.gs(label,i);row.push(v||s||"")}return row;
+      });
+      sheets.push({name:"Schedule",headers:sHeaders,rows:sRows});
+    }
+    // Assumptions sheet
+    var aHeaders=["Parameter","Unit"].concat(trucks.map(function(t,i){return"Truck "+(i+1)+": "+t.truckName}));
+    var aRows=truckRows.filter(function(r){return!r.section}).map(function(r){
+      var row=[r.label,r.unit||""];trucks.forEach(function(t){row.push(t[r.field]||"")});return row;
+    });
+    sheets.push({name:"Truck Assumptions",headers:aHeaders,rows:aRows});
+    exportToXLSX(sheets,scn.name.replace(/[^a-zA-Z0-9]/g,"_")+"_export.xlsx");
+  },[results,formulas,scn,trucks]);
 
   const scn=scenarios[activeScnIdx]||scenarios[0];
   const updScn=(fn)=>setScenarios(prev=>{const n=[...prev];n[activeScnIdx]=fn({...n[activeScnIdx]});return n});
@@ -327,6 +401,7 @@ export default function App(){
             <div style={{width:1,height:32,background:"#374151"}}/>
             <div style={{textAlign:"right"}}><div style={{color:"#9ca3af",fontSize:9,fontWeight:600,textTransform:"uppercase",letterSpacing:1}}>Total</div><div style={{color:P.hdrTx,fontSize:15,fontWeight:700,fontFamily:mf}}>{fmtCur(totals.c)}</div></div>
           </>)}
+          {lastSaved&&<div style={{color:"#4ade80",fontSize:9,textAlign:"right"}}><div>💾 Saved</div><div>{lastSaved}</div></div>}
         </div>
       </div>
 
@@ -516,7 +591,13 @@ export default function App(){
 
         {/* ══ RESULTS ══ */}
         {page==="results"&&(<div>
-          <ST icon="📊">Results — {scn.name}</ST>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+            <ST icon="📊">Results — {scn.name}</ST>
+            <div style={{display:"flex",gap:8}}>
+              <Btn onClick={exportResultsCSV} small color={P.gn}>Export CSV</Btn>
+              <Btn onClick={exportResultsXLSX} small solid color={P.gn}>Export Excel</Btn>
+            </div>
+          </div>
           {equipGroups.length===0?<p style={{color:P.txD}}>No results. Check schedule data and active fleets.</p>:equipGroups.map(grp=>(<div key={grp.key} style={{marginBottom:28}}>
             <div style={{padding:"10px 16px",background:P.priBg,borderRadius:"8px 8px 0 0",border:`1px solid ${P.pri}22`,borderBottom:"none"}}>
               <span style={{color:P.pri,fontWeight:700,fontSize:14}}>{grp.truckName} + {grp.diggerName}</span>
@@ -598,7 +679,18 @@ export default function App(){
         {page==="other"&&(<div style={{maxWidth:620}}><ST icon="⚙️">General Assumptions</ST><div style={{...cardS,padding:24}}>
           {[["moistureContent","Moisture Content","%",0.001],["exchangeRate","Exchange Rate (AUD:USD)","ratio",0.01],["discountRate","Discount Rate","%",0.005],["electricityCost","Electricity Cost","$/kWh",0.001],["dieselCost","Diesel Cost","$/L",0.01],["allInFitterPerYear","All-in Fitter Rate","$/hr"],["mannedOperator","Manned Operator","$/SMU"],["calendarTime","Calendar Time","hrs/yr"],["diggerFleetRoundingThreshold","Digger Rounding","frac",0.05]].map(([k,l,u,s])=>(
             <div key={k} style={{display:"flex",alignItems:"center",gap:12,marginBottom:10}}><div style={{flex:1,color:P.txM,fontSize:14,fontWeight:500}}>{l}</div><input type="number" value={otherA[k]} onChange={e=>uO(k,parseFloat(e.target.value)||0)} step={s||0.01} style={{width:145,padding:"7px 12px",background:P.input,border:`1px solid ${P.bd}`,borderRadius:7,color:P.tx,fontFamily:mf,fontSize:14,textAlign:"right"}}/><span style={{color:P.txD,fontSize:12,fontWeight:500,minWidth:55}}>{u}</span></div>))}
-        </div></div>)}
+        </div>
+          <ST icon="💾">Data Management</ST>
+          <div style={{...cardS,padding:20}}>
+            <p style={{color:P.txM,fontSize:13,marginBottom:14}}>Your data is auto-saved to browser storage. Note: CSV file data is not persisted — you will need to re-import CSVs after refreshing. All other settings, scenarios, fleet combos, formulas, and manual schedule data are preserved.</p>
+            <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+              <Btn onClick={function(){if(window.confirm("Clear all saved data and reset to defaults?")){localStorage.removeItem(SAVE_KEY);window.location.reload()}}} color={P.rd} small>Clear All Saved Data</Btn>
+              <Btn onClick={function(){var blob=new Blob([JSON.stringify({trucks:trucks,diggers:diggers,otherA:otherA,formulas:formulas,fleets:fleets,scenarios:scenarios.map(function(s){return Object.assign({},s,{csvData:null})})},null,2)],{type:"application/json"});var url=URL.createObjectURL(blob);var a=document.createElement("a");a.href=url;a.download="mining_fleet_config_backup.json";a.click();URL.revokeObjectURL(url)}} color={P.bl} small>Export Config (JSON)</Btn>
+              <Btn onClick={function(){var inp=document.createElement("input");inp.type="file";inp.accept=".json";inp.onchange=function(e){var f=e.target.files[0];if(!f)return;var rd=new FileReader();rd.onload=function(ev){try{var d=JSON.parse(ev.target.result);if(d.trucks)setTrucks(d.trucks);if(d.diggers)setDiggers(d.diggers);if(d.otherA)setOtherA(d.otherA);if(d.formulas)setFormulas(d.formulas);if(d.fleets)setFleets(d.fleets);if(d.scenarios)setScenarios(d.scenarios);alert("Configuration restored!")}catch(err){alert("Error: "+err.message)}};rd.readAsText(f)};inp.click()}} color={P.gn} small>Import Config (JSON)</Btn>
+            </div>
+            {lastSaved&&<p style={{color:P.gn,fontSize:11,marginTop:10}}>Last auto-saved: {lastSaved}</p>}
+          </div>
+        </div>)}
 
         {/* ══ COMPARISON ══ */}
         {page==="comparison"&&(<div>
@@ -723,7 +815,23 @@ export default function App(){
           <ST icon="📈">Results Charts — {scn.name}</ST>
           {results.length===0?<p style={{color:P.txD}}>No results data.</p>:(function(){
             var pData=results.filter(function(r){return r.res});
-            var physData=[];for(var pi2=0;pi2<numPeriods;pi2++){var fleet0=activeFleets[0];if(!fleet0)continue;var pd3=getPd(pi2,fleet0);if(!pd3)continue;physData.push({period:pd3.periodLabel||("P"+(pi2+1)),Ore:(pd3.oreMined||0)*scn.unitMul,Waste:(pd3.wasteMined||0)*scn.unitMul,RampBuild:(pd3.totalRampMined||0)*scn.unitMul,Fe:pd3.oreFePct||0,Si:pd3.oreSiPct||0,Al:pd3.oreAlPct||0,P:pd3.orePPct||0})}
+            // Build physicals data per period, aggregating across all active fleets
+            var physData=[];
+            for(var pi2=0;pi2<numPeriods;pi2++){
+              var pRow={period:"P"+(pi2+1),Ore:0,Waste:0,RampBuild:0,Fe:0,Si:0,Al:0,P:0,oreCount:0};
+              for(var fi3=0;fi3<activeFleets.length;fi3++){
+                var fl3=activeFleets[fi3];
+                var pd3=getPd(pi2,fl3);
+                if(!pd3)continue;
+                if(!pRow.periodSet){pRow.period=pd3.periodLabel||pRow.period;pRow.periodSet=true}
+                pRow.Ore+=(pd3.oreMined||0)*scn.unitMul;
+                pRow.Waste+=(pd3.wasteMined||0)*scn.unitMul;
+                pRow.RampBuild+=(pd3.totalRampMined||0)*scn.unitMul;
+                // For grades, take from whichever fleet has ore (weighted average or just first non-zero)
+                if((pd3.oreFePct||0)>0&&pRow.Fe===0){pRow.Fe=pd3.oreFePct;pRow.Si=pd3.oreSiPct||0;pRow.Al=pd3.oreAlPct||0;pRow.P=pd3.orePPct||0}
+              }
+              physData.push(pRow);
+            }
             return(<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
             {/* Physicals: Tonnage stacked bar */}
             <div style={cardS}><div style={{padding:"16px 16px 4px",fontWeight:700,color:P.pri,fontSize:13}}>Mining Physicals — Tonnage</div>
@@ -834,14 +942,29 @@ export default function App(){
           {scenarios.map(function(s,si){
             var np3=s.csvData?s.csvData.np:s.manualData.length;
             var aFl2=fleets.filter(function(f){return s.activeFleetIds.length===0||s.activeFleetIds.includes(f.id)});
-            var fleet3=aFl2[0];if(!fleet3)return null;
+            if(aFl2.length===0)return null;
             var physData3=[];
             for(var pi3=0;pi3<np3;pi3++){
-              var psIdx3=s.fleetPhysicalSets[fleet3.id]||0;var mapping3=s.fieldMappings[psIdx3]||s.fieldMappings[0];var pd4=null;
-              if(s.csvData&&mapping3){pd4={periodLabel:s.csvData.gs("Period",pi3)||("P"+(pi3+1))};for(var pfi2=0;pfi2<PHYS_FIELDS.length;pfi2++){var pf2=PHYS_FIELDS[pfi2];pd4[pf2.key]=mapping3.fields[pf2.key]?s.csvData.gv(mapping3.fields[pf2.key],pi3):0}}
-              else if(s.manualData[pi3]){pd4=s.manualData[pi3];pd4.periodLabel=pd4.periodLabel||("P"+(pi3+1))}
-              if(!pd4)continue;
-              physData3.push({period:pd4.periodLabel,Ore:(pd4.oreMined||0)*s.unitMul,Waste:(pd4.wasteMined||0)*s.unitMul,RampBuild:(pd4.totalRampMined||0)*s.unitMul,Fe:pd4.oreFePct||0,Si:pd4.oreSiPct||0,Al:pd4.oreAlPct||0,P:pd4.orePPct||0});
+              var pRow3={period:"P"+(pi3+1),Ore:0,Waste:0,RampBuild:0,Fe:0,Si:0,Al:0,P:0};
+              for(var fi4=0;fi4<aFl2.length;fi4++){
+                var fl4=aFl2[fi4];
+                var psIdx3=s.fleetPhysicalSets[fl4.id]||0;
+                var mapping3=s.fieldMappings[psIdx3]||s.fieldMappings[0];
+                var pd4=null;
+                if(s.csvData&&mapping3){
+                  pd4={periodLabel:s.csvData.gs("Period",pi3)||("P"+(pi3+1))};
+                  for(var pfi2=0;pfi2<PHYS_FIELDS.length;pfi2++){var pf2=PHYS_FIELDS[pfi2];pd4[pf2.key]=mapping3.fields[pf2.key]?s.csvData.gv(mapping3.fields[pf2.key],pi3):0}
+                } else if(s.manualData[pi3]){
+                  pd4=Object.assign({},s.manualData[pi3]);pd4.periodLabel=pd4.periodLabel||("P"+(pi3+1));
+                }
+                if(!pd4)continue;
+                if(!pRow3.periodSet){pRow3.period=pd4.periodLabel;pRow3.periodSet=true}
+                pRow3.Ore+=(pd4.oreMined||0)*s.unitMul;
+                pRow3.Waste+=(pd4.wasteMined||0)*s.unitMul;
+                pRow3.RampBuild+=(pd4.totalRampMined||0)*s.unitMul;
+                if((pd4.oreFePct||0)>0&&pRow3.Fe===0){pRow3.Fe=pd4.oreFePct;pRow3.Si=pd4.oreSiPct||0;pRow3.Al=pd4.oreAlPct||0;pRow3.P=pd4.orePPct||0}
+              }
+              physData3.push(pRow3);
             }
             return(<div key={si} style={{marginBottom:24}}>
               <div style={{padding:"8px 14px",background:P.priBg,borderRadius:"8px 8px 0 0",border:"1px solid "+P.pri+"22",borderBottom:"none"}}><span style={{color:P.pri,fontWeight:700,fontSize:14}}>{s.name}</span></div>
