@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef, useEffect } from "react";
+import React, { useState, useMemo, useCallback, useRef, useEffect, Component } from "react";
 import { ComposedChart, BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -233,8 +233,7 @@ function exportToXLSX(sheetsData,filename){
 }
 
 // ─── ERROR BOUNDARY ────────────────────────────────────────────────────
-var React = require("react");
-class ErrorBoundary extends React.Component {
+class ErrorBoundary extends Component {
   constructor(props) { super(props); this.state = { error: null }; }
   static getDerivedStateFromError(error) { return { error: error }; }
   render() {
